@@ -1,0 +1,24 @@
+---
+description: 禁止在本地执行 Android 编译/构建命令（无管理员权限，无法安装环境）
+alwaysApply: true
+---
+
+# 禁止本地 Android 构建
+
+本机**没有** Android 开发环境，且**无法**安装 JDK、Android SDK、Gradle 等（无管理员权限）。Agent **不得**在本地终端执行任何 Android 相关编译、打包或设备命令。
+
+## 禁止执行的命令（包括但不限于）
+
+- `./gradlew`、`gradlew.bat`、`gradle`（含 `:app:assembleDebug`、`:app:assembleRelease` 等）
+- `adb`、`sdkmanager`、`avdmanager`
+- 安装或配置 Android SDK / JDK / Android Studio 的脚本
+
+## 应采用的替代方式
+
+- **验证构建**：通过 GitHub Actions 云打包（`.github/workflows/android-release-apk.yml`）在 CI 中构建；可建议用户手动触发 workflow 或 push 到 `main`。
+- **代码检查**：仅做静态审查（阅读源码、Gradle/Manifest 配置、语法与逻辑分析），不依赖本地编译结果。
+- **修改构建配置**：可直接编辑 `build.gradle.kts`、`AndroidManifest.xml`、workflow 等文件；改完后说明需在 CI 验证，**不要**在本地尝试构建。
+
+## 用户明确要求本地构建时
+
+说明本机环境限制，建议使用 CI 构建；**不要**反复尝试安装环境或执行上述命令。
