@@ -19,6 +19,7 @@ object PlatformDetector {
     private val XHS_HOSTS = setOf(
         "xiaohongshu.com",
         "www.xiaohongshu.com",
+        "m.xiaohongshu.com",
         "xhslink.com",
     )
 

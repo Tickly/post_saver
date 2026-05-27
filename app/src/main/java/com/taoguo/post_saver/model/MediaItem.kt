@@ -7,6 +7,7 @@ package com.taoguo.post_saver.model
  * @param url 输入：下载地址。
  * @param previewUrl 输入：预览图地址，可为空（视频封面或图片本身）。
  * @param fileName 输入：建议保存文件名，可为空。
+ * @param referer 输入：下载时使用的 Referer，可为空。
  * @return 输出：媒体数据对象。
  */
 data class MediaItem(
@@ -14,4 +15,5 @@ data class MediaItem(
     val url: String,
     val previewUrl: String? = null,
     val fileName: String? = null,
+    val referer: String? = null,
 )

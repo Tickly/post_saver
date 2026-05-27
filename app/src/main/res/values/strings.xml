@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">作品下载助手</string>
     <string name="welcome_message">欢迎使用作品下载助手</string>
-    <string name="hint_paste_link">粘贴抖音分享链接或完整分享文本</string>
+    <string name="hint_paste_link">粘贴抖音或小红书分享链接/文本</string>
     <string name="btn_paste">粘贴</string>
     <string name="btn_parse">解析</string>
     <string name="btn_download">下载</string>

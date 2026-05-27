@@ -31,6 +31,7 @@ class MediaDownloader(
      * @throws Exception 下载或写入失败时抛出。
      */
     fun download(item: MediaItem): String {
+        val referer = item.referer ?: detectReferer(item.url)
         val request = Request.Builder()
             .url(item.url)
             .header(
@@ -38,7 +39,7 @@ class MediaDownloader(
                 "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 " +
                     "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
             )
-            .header("Referer", "https://www.douyin.com/")
+            .header("Referer", referer)
             .build()
 
         val bytes = client.newCall(request).execute().use { response ->
@@ -129,6 +130,20 @@ class MediaDownloader(
         }
 
         return "Movies/PostSaver/$fileName"
+    }
+
+    /**
+     * 根据 URL 推断下载 Referer。
+     *
+     * @param url 输入：媒体 URL。
+     * @return 输出：Referer 字符串。
+     */
+    private fun detectReferer(url: String): String {
+        return when {
+            url.contains("xhscdn.com") || url.contains("xiaohongshu.com") ->
+                "https://www.xiaohongshu.com/"
+            else -> "https://www.douyin.com/"
+        }
     }
 
     /**

@@ -9,6 +9,7 @@ import com.taoguo.post_saver.model.Platform
 object ParserRegistry {
 
     private val douyinParser = DouyinParser()
+    private val xiaohongshuParser = XiaohongshuParser()
 
     /**
      * 解析分享文本，自动识别平台并调用对应解析器。
@@ -44,7 +45,7 @@ object ParserRegistry {
     fun parseUrl(url: String): ParseResult {
         return when (PlatformDetector.detect(url)) {
             Platform.DOUYIN -> douyinParser.parse(url)
-            Platform.XIAOHONGSHU -> throw UnsupportedPlatformException("小红书暂不支持，敬请期待")
+            Platform.XIAOHONGSHU -> xiaohongshuParser.parse(url)
             Platform.UNKNOWN -> throw ParseException("无法识别链接所属平台")
         }
     }
