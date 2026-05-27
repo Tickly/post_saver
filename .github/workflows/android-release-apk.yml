@@ -57,6 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           BUILD_TIME="$(TZ=Asia/Shanghai date +%Y-%m-%d-%H-%M-%S)"
+          echo "BUILD_TIME=$BUILD_TIME" >> "$GITHUB_ENV"
           SRC="$(ls app/build/outputs/apk/release/*.apk | head -n 1)"
           BASENAME="$(basename "$SRC" .apk)"
           DEST="app/build/outputs/apk/release/${BASENAME}-${BUILD_TIME}.apk"
@@ -65,6 +66,6 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-apk
+          name: app-release-${{ env.BUILD_TIME }}
           path: app/build/outputs/apk/release/*.apk
 

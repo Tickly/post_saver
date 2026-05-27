@@ -190,7 +190,16 @@ base64 -i post-saver-release.keystore
 
 ### 获取 APK
 
-运行 workflow 后，在 Actions 运行记录页面下载 artifact：`app-release-apk`。
+运行 workflow 成功后，在 Actions 运行记录页面的 **Artifacts** 区域下载构建产物。
+
+CI 会在打包完成后，用**北京时间**（`Asia/Shanghai`）为产物追加同一时间戳，格式为 `年-月-日-时-分-秒`（例如 `2026-05-26-14-38-37`）：
+
+| 产物 | 命名示例 |
+|------|----------|
+| 下载的压缩包（artifact） | `app-release-2026-05-26-14-38-37.zip` |
+| 压缩包内的 APK | `app-release-2026-05-26-14-38-37.apk` |
+
+artifact 名称与 APK 文件名使用**同一次构建的同一时间戳**，便于对应版本。命名逻辑见 workflow 中的 `Rename APK with Beijing build time` 步骤。
 
 ## 验证构建
 
@@ -198,7 +207,7 @@ base64 -i post-saver-release.keystore
 
 1. Push 到默认分支（`main`），或在 GitHub Actions 页面手动触发 `android-release-apk`
 2. 确认 workflow 运行成功
-3. 下载 artifact `app-release-apk` 并安装验证
+3. 下载 artifact（如 `app-release-2026-05-26-14-38-37.zip`），解压后安装其中的 APK 并验证
 
 ## 快速自检清单
 
