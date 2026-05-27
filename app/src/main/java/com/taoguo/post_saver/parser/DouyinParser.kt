@@ -26,7 +26,8 @@ class DouyinParser(
      * @throws ParseException 解析失败时抛出。
      */
     override fun parse(url: String): ParseResult {
-        val resolvedUrl = resolveFinalUrl(url)
+        val normalizedUrl = UrlNormalizer.normalize(url)
+        val resolvedUrl = resolveFinalUrl(normalizedUrl)
         val itemId = extractItemId(resolvedUrl)
             ?: throw ParseException("无法从链接中提取作品 ID")
 
@@ -282,19 +283,17 @@ class DouyinParser(
         if (hasImages) {
             for (index in 0 until images!!.length()) {
                 val imageObj = images.optJSONObject(index) ?: continue
-                val imageUrl = pickBestUrl(imageObj.optJSONArray("url_list"))
-                    ?: pickBestUrl(imageObj.optJSONObject("download_url_list")?.optJSONArray("url_list"))
-                if (imageUrl != null) {
-                    items.add(
-                        MediaItem(
-                            type = MediaType.IMAGE,
-                            url = imageUrl,
-                            previewUrl = imageUrl,
-                            fileName = "douyin_${awemeId}_${index + 1}.jpg",
-                        ),
-                    )
-                }
+                val imageUrl = pickImageUrl(imageObj) ?: continue
+                items.add(createImageItem(awemeId, index, imageUrl))
             }
+        }
+
+        if (items.isEmpty() && isImagePost) {
+            extractCoverImages(item, awemeId).let { items.addAll(it) }
+        }
+
+        if (items.isEmpty()) {
+            extractFromImageInfos(item, awemeId).let { items.addAll(it) }
         }
 
         if (!isImagePost) {
@@ -311,6 +310,7 @@ class DouyinParser(
                             url = playUrl,
                             previewUrl = coverUrl,
                             fileName = "douyin_${awemeId}.mp4",
+                            referer = DOUYIN_REFERER,
                         ),
                     )
                 }
@@ -318,6 +318,96 @@ class DouyinParser(
         }
 
         return items
+    }
+
+    /**
+     * 从单张图片 JSON 中提取最佳图片 URL。
+     *
+     * @param imageObj 输入：图片 JSON 对象。
+     * @return 输出：图片 URL；未找到时返回 null。
+     */
+    private fun pickImageUrl(imageObj: JSONObject): String? {
+        return pickBestUrl(imageObj.optJSONArray("url_list"))
+            ?: pickBestUrlFromDownloadList(imageObj.optJSONArray("download_url_list"))
+            ?: imageObj.optString("download_url").takeIf { it.isNotBlank() }?.let { UrlNormalizer.normalize(it) }
+    }
+
+    /**
+     * 从封面字段提取图片（图文单图常见结构）。
+     *
+     * @param item 输入：aweme JSON 对象。
+     * @param awemeId 输入：作品 ID。
+     * @return 输出：图片媒体列表。
+     */
+    private fun extractCoverImages(item: JSONObject, awemeId: String): List<MediaItem> {
+        val video = item.optJSONObject("video") ?: return emptyList()
+        val coverUrl = pickBestUrl(video.optJSONObject("cover")?.optJSONArray("url_list"))
+            ?: pickBestUrl(video.optJSONObject("origin_cover")?.optJSONArray("url_list"))
+            ?: pickBestUrl(video.optJSONObject("dynamic_cover")?.optJSONArray("url_list"))
+        return coverUrl?.let { listOf(createImageItem(awemeId, 0, it)) } ?: emptyList()
+    }
+
+    /**
+     * 从 image_infos 字段提取图片列表。
+     *
+     * @param item 输入：aweme JSON 对象。
+     * @param awemeId 输入：作品 ID。
+     * @return 输出：图片媒体列表。
+     */
+    private fun extractFromImageInfos(item: JSONObject, awemeId: String): List<MediaItem> {
+        val imageInfos = item.optJSONArray("image_infos") ?: return emptyList()
+        val results = mutableListOf<MediaItem>()
+        for (index in 0 until imageInfos.length()) {
+            val info = imageInfos.optJSONObject(index) ?: continue
+            val url = pickBestUrl(info.optJSONArray("url_list"))
+                ?: pickBestUrl(info.optJSONObject("label_large")?.optJSONArray("url_list"))
+                ?: pickBestUrl(info.optJSONObject("label_thumb")?.optJSONArray("url_list"))
+            if (url != null) {
+                results.add(createImageItem(awemeId, index, url))
+            }
+        }
+        return results
+    }
+
+    /**
+     * 创建抖音图片媒体项。
+     *
+     * @param awemeId 输入：作品 ID。
+     * @param index 输入：图片序号。
+     * @param rawUrl 输入：原始图片 URL。
+     * @return 输出：MediaItem 实例。
+     */
+    private fun createImageItem(awemeId: String, index: Int, rawUrl: String): MediaItem {
+        val url = UrlNormalizer.normalize(rawUrl)
+        return MediaItem(
+            type = MediaType.IMAGE,
+            url = url,
+            previewUrl = url,
+            fileName = "douyin_${awemeId}_${index + 1}.jpg",
+            referer = DOUYIN_REFERER,
+        )
+    }
+
+    /**
+     * 从 download_url_list 数组中提取 URL。
+     *
+     * @param list 输入：download_url_list JSON 数组。
+     * @return 输出：图片 URL；未找到时返回 null。
+     */
+    private fun pickBestUrlFromDownloadList(list: JSONArray?): String? {
+        if (list == null || list.length() == 0) return null
+        for (index in 0 until list.length()) {
+            when (val element = list.opt(index)) {
+                is JSONObject -> {
+                    pickBestUrl(element.optJSONArray("url_list"))?.let { return it }
+                    element.optString("url").takeIf { it.isNotBlank() }?.let {
+                        return UrlNormalizer.normalize(it)
+                    }
+                }
+                is String -> if (element.isNotBlank()) return UrlNormalizer.normalize(element)
+            }
+        }
+        return null
     }
 
     /**
@@ -342,14 +432,23 @@ class DouyinParser(
      */
     private fun pickBestUrl(urlList: JSONArray?): String? {
         if (urlList == null || urlList.length() == 0) return null
-        val urls = (0 until urlList.length()).mapNotNull { index ->
-            urlList.optString(index).takeIf { it.isNotBlank() }
+        val urls = mutableListOf<String>()
+        for (index in 0 until urlList.length()) {
+            when (val element = urlList.opt(index)) {
+                is String -> if (element.isNotBlank()) urls.add(element)
+                is JSONObject -> {
+                    element.optString("url").takeIf { it.isNotBlank() }?.let { urls.add(it) }
+                    element.optString("uri").takeIf { it.startsWith("http") }?.let { urls.add(it) }
+                }
+            }
         }
-        return urls.firstOrNull { !it.contains("watermark", ignoreCase = true) }
-            ?: urls.firstOrNull()
+        val normalized = urls.map { UrlNormalizer.normalize(it) }
+        return normalized.firstOrNull { !it.contains("watermark", ignoreCase = true) }
+            ?: normalized.firstOrNull()
     }
 
     companion object {
+        private const val DOUYIN_REFERER = "https://www.douyin.com/"
         private val IMAGE_AWEME_TYPES = setOf(2, 68, 61)
         private val IMAGE_URL_HINTS = listOf(".jpg", ".jpeg", ".webp", ".png", ".heic", "/image/")
         private val VIDEO_URL_HINTS = listOf(".mp4", "/video/", "mime_type=video", "mime=video", "video/tos")

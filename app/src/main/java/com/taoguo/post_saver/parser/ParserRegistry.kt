@@ -43,9 +43,10 @@ object ParserRegistry {
      * @throws UnsupportedPlatformException 平台暂不支持时抛出。
      */
     fun parseUrl(url: String): ParseResult {
-        return when (PlatformDetector.detect(url)) {
-            Platform.DOUYIN -> douyinParser.parse(url)
-            Platform.XIAOHONGSHU -> xiaohongshuParser.parse(url)
+        val normalizedUrl = UrlNormalizer.normalize(url)
+        return when (PlatformDetector.detect(normalizedUrl)) {
+            Platform.DOUYIN -> douyinParser.parse(normalizedUrl)
+            Platform.XIAOHONGSHU -> xiaohongshuParser.parse(normalizedUrl)
             Platform.UNKNOWN -> throw ParseException("无法识别链接所属平台")
         }
     }

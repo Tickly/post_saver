@@ -25,7 +25,8 @@ class XiaohongshuParser(
      * @throws ParseException 解析失败时抛出。
      */
     override fun parse(url: String): ParseResult {
-        val resolvedUrl = resolveFinalUrl(url)
+        val normalizedUrl = UrlNormalizer.normalize(url)
+        val resolvedUrl = resolveFinalUrl(normalizedUrl)
         val noteId = extractNoteId(resolvedUrl)
             ?: throw ParseException("无法从链接中提取笔记 ID")
 

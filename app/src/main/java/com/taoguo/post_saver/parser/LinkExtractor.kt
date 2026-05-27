@@ -16,7 +16,9 @@ object LinkExtractor {
     fun extractUrls(text: String): List<String> {
         return URL_PATTERN.findAll(text)
             .map { match ->
-                match.value.trimEnd(',', '.', ';', '，', '。', '！', '!', ')', '）', ']')
+                UrlNormalizer.normalize(
+                    match.value.trimEnd(',', '.', ';', '，', '。', '！', '!', ')', '）', ']'),
+                )
             }
             .distinct()
             .toList()

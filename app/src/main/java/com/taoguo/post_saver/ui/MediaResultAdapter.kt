@@ -8,6 +8,7 @@ import com.taoguo.post_saver.R
 import com.taoguo.post_saver.databinding.ItemMediaResultBinding
 import com.taoguo.post_saver.model.MediaItem
 import com.taoguo.post_saver.model.MediaType
+import com.taoguo.post_saver.parser.UrlNormalizer
 
 /**
  * 解析结果媒体列表适配器。
@@ -107,9 +108,16 @@ class MediaResultAdapter(
             binding.textMediaType.text = typeLabel
             binding.textMediaIndex.text = context.getString(R.string.label_media_index, position + 1)
 
-            val previewUrl = item.previewUrl ?: item.url
+            val previewUrl = UrlNormalizer.normalize(item.previewUrl ?: item.url)
+            val referer = item.referer ?: UrlNormalizer.refererFor(previewUrl)
             binding.imagePreview.load(previewUrl) {
                 crossfade(true)
+                addHeader("Referer", referer)
+                addHeader(
+                    "User-Agent",
+                    "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 " +
+                        "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+                )
                 placeholder(R.drawable.ic_launcher_foreground)
                 error(R.drawable.ic_launcher_foreground)
             }
