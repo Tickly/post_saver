@@ -22,6 +22,8 @@ object UrlNormalizer {
         "toutiaoimg.com",
         "pstatp.com",
         "tiktokcdn.com",
+        "douyinvod.com",
+        "ixigua.com",
     )
 
     private const val DOUYIN_REFERER = "https://www.douyin.com/"
