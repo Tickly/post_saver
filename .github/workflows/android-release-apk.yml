@@ -52,6 +52,16 @@ jobs:
         run: |
           gradle --no-daemon :app:assembleRelease
 
+      - name: Rename APK with Beijing build time
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_TIME="$(TZ=Asia/Shanghai date +%Y-%m-%d-%H-%M-%S)"
+          SRC="$(ls app/build/outputs/apk/release/*.apk | head -n 1)"
+          BASENAME="$(basename "$SRC" .apk)"
+          DEST="app/build/outputs/apk/release/${BASENAME}-${BUILD_TIME}.apk"
+          mv "$SRC" "$DEST"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
