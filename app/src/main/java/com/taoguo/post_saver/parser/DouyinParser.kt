@@ -275,8 +275,12 @@ class DouyinParser(
         val items = mutableListOf<MediaItem>()
 
         val images = item.optJSONArray("images")
-        if (images != null && images.length() > 0) {
-            for (index in 0 until images.length()) {
+        val hasImages = images != null && images.length() > 0
+        val awemeType = item.optInt("aweme_type", item.optInt("awemeType", -1))
+        val isImagePost = hasImages || awemeType in IMAGE_AWEME_TYPES
+
+        if (hasImages) {
+            for (index in 0 until images!!.length()) {
                 val imageObj = images.optJSONObject(index) ?: continue
                 val imageUrl = pickBestUrl(imageObj.optJSONArray("url_list"))
                     ?: pickBestUrl(imageObj.optJSONObject("download_url_list")?.optJSONArray("url_list"))
@@ -293,25 +297,41 @@ class DouyinParser(
             }
         }
 
-        val video = item.optJSONObject("video")
-        if (video != null) {
-            val playUrl = pickBestUrl(video.optJSONObject("play_addr")?.optJSONArray("url_list"))
-                ?: pickBestUrl(video.optJSONObject("download_addr")?.optJSONArray("url_list"))
-            val coverUrl = pickBestUrl(video.optJSONObject("cover")?.optJSONArray("url_list"))
-                ?: pickBestUrl(video.optJSONObject("origin_cover")?.optJSONArray("url_list"))
-            if (playUrl != null) {
-                items.add(
-                    MediaItem(
-                        type = MediaType.VIDEO,
-                        url = playUrl,
-                        previewUrl = coverUrl,
-                        fileName = "douyin_${awemeId}.mp4",
-                    ),
-                )
+        if (!isImagePost) {
+            val video = item.optJSONObject("video")
+            if (video != null) {
+                val playUrl = pickBestUrl(video.optJSONObject("play_addr")?.optJSONArray("url_list"))
+                    ?: pickBestUrl(video.optJSONObject("download_addr")?.optJSONArray("url_list"))
+                val coverUrl = pickBestUrl(video.optJSONObject("cover")?.optJSONArray("url_list"))
+                    ?: pickBestUrl(video.optJSONObject("origin_cover")?.optJSONArray("url_list"))
+                if (playUrl != null && isVideoUrl(playUrl)) {
+                    items.add(
+                        MediaItem(
+                            type = MediaType.VIDEO,
+                            url = playUrl,
+                            previewUrl = coverUrl,
+                            fileName = "douyin_${awemeId}.mp4",
+                        ),
+                    )
+                }
             }
         }
 
         return items
+    }
+
+    /**
+     * 判断 URL 是否为视频资源（排除误把图片地址当作视频的情况）。
+     *
+     * @param url 输入：待检测 URL。
+     * @return 输出：true 表示像视频地址；false 表示像图片或非视频地址。
+     */
+    private fun isVideoUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        if (IMAGE_URL_HINTS.any { lower.contains(it) }) {
+            return false
+        }
+        return VIDEO_URL_HINTS.any { lower.contains(it) }
     }
 
     /**
@@ -330,6 +350,9 @@ class DouyinParser(
     }
 
     companion object {
+        private val IMAGE_AWEME_TYPES = setOf(2, 68, 61)
+        private val IMAGE_URL_HINTS = listOf(".jpg", ".jpeg", ".webp", ".png", ".heic", "/image/")
+        private val VIDEO_URL_HINTS = listOf(".mp4", "/video/", "mime_type=video", "mime=video", "video/tos")
         private const val MOBILE_USER_AGENT =
             "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 " +
                 "(KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
