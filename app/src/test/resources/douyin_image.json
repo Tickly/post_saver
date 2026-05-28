@@ -1,0 +1,35 @@
+{
+  "aweme_id": "7234567890123456789",
+  "desc": "测试图文单图",
+  "aweme_type": 68,
+  "author": {
+    "nickname": "test_user"
+  },
+  "images": [
+    {
+      "url_list": [
+        "https://p3-sign.douyinpic.com/bad-no-watermark.jpeg"
+      ],
+      "download_url_list": [
+        {
+          "url_list": [
+            "https://p3-sign.douyinpic.com/good-watermark.jpeg?watermark=1"
+          ]
+        }
+      ]
+    }
+  ],
+  "video": {
+    "duration": 0,
+    "play_addr": {
+      "url_list": [
+        "https://p3-sign.douyinpic.com/fake-play.jpeg"
+      ]
+    },
+    "cover": {
+      "url_list": [
+        "https://p3-sign.douyinpic.com/cover-fallback.jpeg"
+      ]
+    }
+  }
+}

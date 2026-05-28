@@ -1,0 +1,27 @@
+{
+  "aweme_id": "7345678901234567890",
+  "desc": "测试图集",
+  "aweme_type": 2,
+  "images": [
+    {
+      "download_url_list": [
+        {
+          "url_list": ["https://p3-sign.douyinpic.com/image1.jpeg"]
+        }
+      ]
+    },
+    {
+      "download_url_list": [
+        {
+          "url_list": ["https://p3-sign.douyinpic.com/image2.jpeg"]
+        }
+      ]
+    }
+  ],
+  "video": {
+    "duration": 0,
+    "play_addr": {
+      "url_list": ["https://p3-sign.douyinpic.com/should-not-use.jpeg"]
+    }
+  }
+}

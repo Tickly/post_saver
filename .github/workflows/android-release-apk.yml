@@ -68,4 +68,5 @@ jobs:
         with:
           name: app-release-${{ env.BUILD_TIME }}
           path: app/build/outputs/apk/release/*.apk
+          retention-days: 1
 

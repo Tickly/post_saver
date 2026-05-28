@@ -277,12 +277,12 @@ class DouyinParser(
 
         val video = item.optJSONObject("video")
         val playUrl = extractVideoPlayUrl(video)
-        val isImagePost = isImageOnlyPost(item, playUrl)
+        val contentType = classifyContentType(item, playUrl)
 
         val images = item.optJSONArray("images")
         val hasImages = images != null && images.length() > 0
 
-        if (isImagePost && hasImages) {
+        if (contentType == DouyinContentType.IMAGE && hasImages) {
             for (index in 0 until images!!.length()) {
                 val imageObj = images.optJSONObject(index) ?: continue
                 val imageUrl = pickImageUrl(imageObj) ?: continue
@@ -290,18 +290,18 @@ class DouyinParser(
             }
         }
 
-        if (isImagePost && items.isEmpty()) {
+        if (contentType == DouyinContentType.IMAGE && items.isEmpty()) {
             extractCoverImages(item, awemeId).let { items.addAll(it) }
         }
 
-        if (isImagePost && items.isEmpty()) {
+        if (contentType == DouyinContentType.IMAGE && items.isEmpty()) {
             extractFromImageInfos(item, awemeId).let { items.addAll(it) }
         }
 
-        if (!isImagePost && playUrl != null) {
-            val coverUrl = pickBestUrl(video?.optJSONObject("cover")?.optJSONArray("url_list"))
-                ?: pickBestUrl(video?.optJSONObject("origin_cover")?.optJSONArray("url_list"))
-                ?: pickBestUrl(video?.optJSONObject("dynamic_cover")?.optJSONArray("url_list"))
+        if (contentType == DouyinContentType.VIDEO && playUrl != null) {
+            val coverUrl = pickBestImageUrl(video?.optJSONObject("cover")?.optJSONArray("url_list"))
+                ?: pickBestImageUrl(video?.optJSONObject("origin_cover")?.optJSONArray("url_list"))
+                ?: pickBestImageUrl(video?.optJSONObject("dynamic_cover")?.optJSONArray("url_list"))
             items.add(
                 MediaItem(
                     type = MediaType.VIDEO,
@@ -317,22 +317,36 @@ class DouyinParser(
     }
 
     /**
-     * 判断是否为纯图片类作品（图集/图文），避免与视频作品混淆。
+     * 判断作品应作为图片还是视频处理。
      *
      * @param item 输入：aweme JSON 对象。
      * @param playUrl 输入：已提取的视频播放地址，可为空。
-     * @return 输出：true 表示应按图片作品处理。
+     * @return 输出：内容类型枚举。
      */
-    private fun isImageOnlyPost(item: JSONObject, playUrl: String?): Boolean {
+    private fun classifyContentType(item: JSONObject, playUrl: String?): DouyinContentType {
         val awemeType = item.optInt("aweme_type", item.optInt("awemeType", -1))
+        val duration = item.optJSONObject("video")?.optInt("duration", 0) ?: 0
+        val hasImages = (item.optJSONArray("images")?.length() ?: 0) > 0
+
         if (awemeType in IMAGE_AWEME_TYPES) {
-            return true
+            return DouyinContentType.IMAGE
         }
-        if (awemeType in VIDEO_AWEME_TYPES) {
-            return false
+        if (awemeType in VIDEO_AWEME_TYPES && duration > 0 && playUrl != null) {
+            return DouyinContentType.VIDEO
         }
-        val hasImages = item.optJSONArray("images")?.length() ?: 0 > 0
-        return hasImages && playUrl == null
+        if (hasImages && (playUrl == null || duration == 0)) {
+            return DouyinContentType.IMAGE
+        }
+        if (playUrl != null && duration > 0) {
+            return DouyinContentType.VIDEO
+        }
+        if (hasImages) {
+            return DouyinContentType.IMAGE
+        }
+        if (playUrl != null) {
+            return DouyinContentType.VIDEO
+        }
+        return DouyinContentType.IMAGE
     }
 
     /**
@@ -347,9 +361,9 @@ class DouyinParser(
         }
 
         val candidates = listOfNotNull(
-            pickBestUrl(video.optJSONObject("play_addr")?.optJSONArray("url_list")),
-            pickBestUrl(video.optJSONObject("download_addr")?.optJSONArray("url_list")),
-            pickBestUrlFromBitRate(video.optJSONArray("bit_rate")),
+            pickBestVideoUrl(video.optJSONObject("play_addr")?.optJSONArray("url_list")),
+            pickBestVideoUrl(video.optJSONObject("download_addr")?.optJSONArray("url_list")),
+            pickBestVideoUrlFromBitRate(video.optJSONArray("bit_rate")),
         )
 
         return candidates.firstOrNull { !isImageUrl(it) }
@@ -361,13 +375,13 @@ class DouyinParser(
      * @param bitRateList 输入：bit_rate JSON 数组。
      * @return 输出：视频 URL；未找到时返回 null。
      */
-    private fun pickBestUrlFromBitRate(bitRateList: JSONArray?): String? {
+    private fun pickBestVideoUrlFromBitRate(bitRateList: JSONArray?): String? {
         if (bitRateList == null || bitRateList.length() == 0) {
             return null
         }
         for (index in 0 until bitRateList.length()) {
             val bitRate = bitRateList.optJSONObject(index) ?: continue
-            pickBestUrl(bitRate.optJSONObject("play_addr")?.optJSONArray("url_list"))?.let { return it }
+            pickBestVideoUrl(bitRate.optJSONObject("play_addr")?.optJSONArray("url_list"))?.let { return it }
         }
         return null
     }
@@ -379,8 +393,8 @@ class DouyinParser(
      * @return 输出：图片 URL；未找到时返回 null。
      */
     private fun pickImageUrl(imageObj: JSONObject): String? {
-        return pickBestUrl(imageObj.optJSONArray("url_list"))
-            ?: pickBestUrlFromDownloadList(imageObj.optJSONArray("download_url_list"))
+        return pickBestUrlFromDownloadList(imageObj.optJSONArray("download_url_list"))
+            ?: pickBestImageUrl(imageObj.optJSONArray("url_list"))
             ?: imageObj.optString("download_url").takeIf { it.isNotBlank() }?.let { UrlNormalizer.normalize(it) }
     }
 
@@ -393,9 +407,9 @@ class DouyinParser(
      */
     private fun extractCoverImages(item: JSONObject, awemeId: String): List<MediaItem> {
         val video = item.optJSONObject("video") ?: return emptyList()
-        val coverUrl = pickBestUrl(video.optJSONObject("cover")?.optJSONArray("url_list"))
-            ?: pickBestUrl(video.optJSONObject("origin_cover")?.optJSONArray("url_list"))
-            ?: pickBestUrl(video.optJSONObject("dynamic_cover")?.optJSONArray("url_list"))
+        val coverUrl = pickBestImageUrl(video.optJSONObject("cover")?.optJSONArray("url_list"))
+            ?: pickBestImageUrl(video.optJSONObject("origin_cover")?.optJSONArray("url_list"))
+            ?: pickBestImageUrl(video.optJSONObject("dynamic_cover")?.optJSONArray("url_list"))
         return coverUrl?.let { listOf(createImageItem(awemeId, 0, it)) } ?: emptyList()
     }
 
@@ -411,9 +425,9 @@ class DouyinParser(
         val results = mutableListOf<MediaItem>()
         for (index in 0 until imageInfos.length()) {
             val info = imageInfos.optJSONObject(index) ?: continue
-            val url = pickBestUrl(info.optJSONArray("url_list"))
-                ?: pickBestUrl(info.optJSONObject("label_large")?.optJSONArray("url_list"))
-                ?: pickBestUrl(info.optJSONObject("label_thumb")?.optJSONArray("url_list"))
+            val url = pickBestImageUrl(info.optJSONArray("url_list"))
+                ?: pickBestImageUrl(info.optJSONObject("label_large")?.optJSONArray("url_list"))
+                ?: pickBestImageUrl(info.optJSONObject("label_thumb")?.optJSONArray("url_list"))
             if (url != null) {
                 results.add(createImageItem(awemeId, index, url))
             }
@@ -451,7 +465,7 @@ class DouyinParser(
         for (index in 0 until list.length()) {
             when (val element = list.opt(index)) {
                 is JSONObject -> {
-                    pickBestUrl(element.optJSONArray("url_list"))?.let { return it }
+                    pickBestImageUrl(element.optJSONArray("url_list"))?.let { return it }
                     element.optString("url").takeIf { it.isNotBlank() }?.let {
                         return UrlNormalizer.normalize(it)
                     }
@@ -463,24 +477,13 @@ class DouyinParser(
     }
 
     /**
-     * 判断 URL 是否明显为图片地址。
-     *
-     * @param url 输入：待检测 URL。
-     * @return 输出：true 表示像图片地址。
-     */
-    private fun isImageUrl(url: String): Boolean {
-        val lower = url.lowercase()
-        return IMAGE_URL_HINTS.any { lower.contains(it) }
-    }
-
-    /**
-     * 从 url_list 中选取最佳 URL（优先无水印）。
+     * 从 url_list 收集并规范化全部 URL。
      *
      * @param urlList 输入：URL 数组。
-     * @return 输出：最佳 URL；列表为空时返回 null。
+     * @return 输出：规范化后的 URL 列表。
      */
-    private fun pickBestUrl(urlList: JSONArray?): String? {
-        if (urlList == null || urlList.length() == 0) return null
+    private fun collectUrls(urlList: JSONArray?): List<String> {
+        if (urlList == null || urlList.length() == 0) return emptyList()
         val urls = mutableListOf<String>()
         for (index in 0 until urlList.length()) {
             val element = urlList.opt(index)
@@ -494,9 +497,69 @@ class DouyinParser(
                 else -> urlList.optString(index).takeIf { it.isNotBlank() }?.let { urls.add(it) }
             }
         }
-        val normalized = urls.map { UrlNormalizer.normalize(it) }
+        return urls.map { UrlNormalizer.normalize(it) }
+    }
+
+    /**
+     * 从 url_list 中选取图片 URL（不过滤 watermark）。
+     *
+     * @param urlList 输入：URL 数组。
+     * @return 输出：图片 URL；列表为空时返回 null。
+     */
+    private fun pickBestImageUrl(urlList: JSONArray?): String? {
+        return collectUrls(urlList).firstOrNull()
+    }
+
+    /**
+     * 从 url_list 中选取视频 URL（优先无 watermark）。
+     *
+     * @param urlList 输入：URL 数组。
+     * @return 输出：视频 URL；列表为空时返回 null。
+     */
+    private fun pickBestVideoUrl(urlList: JSONArray?): String? {
+        val normalized = collectUrls(urlList)
         return normalized.firstOrNull { !it.contains("watermark", ignoreCase = true) }
             ?: normalized.firstOrNull()
+    }
+
+    /**
+     * 供单元测试调用：从 aweme JSON 构建媒体列表。
+     *
+     * @param item 输入：aweme JSON 对象。
+     * @return 输出：媒体资源列表。
+     */
+    internal fun buildMediaItemsForTest(item: JSONObject): List<MediaItem> {
+        return buildMediaItems(item)
+    }
+
+    /**
+     * 抖音作品内容类型。
+     */
+    internal enum class DouyinContentType {
+        IMAGE,
+        VIDEO,
+    }
+
+    /**
+     * 供单元测试调用：判断作品内容类型。
+     *
+     * @param item 输入：aweme JSON 对象。
+     * @return 输出：内容类型枚举。
+     */
+    internal fun classifyContentTypeForTest(item: JSONObject): DouyinContentType {
+        val playUrl = extractVideoPlayUrl(item.optJSONObject("video"))
+        return classifyContentType(item, playUrl)
+    }
+
+    /**
+     * 判断 URL 是否明显为图片地址。
+     *
+     * @param url 输入：待检测 URL。
+     * @return 输出：true 表示像图片地址。
+     */
+    private fun isImageUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return IMAGE_URL_HINTS.any { lower.contains(it) }
     }
 
     companion object {

@@ -1,0 +1,22 @@
+{
+  "aweme_id": "7123456789012345678",
+  "desc": "测试视频作品",
+  "aweme_type": 0,
+  "author": {
+    "nickname": "test_user"
+  },
+  "video": {
+    "duration": 15234,
+    "play_addr": {
+      "url_list": [
+        "https://v26-web.douyinvod.com/video/tos/clean/video.mp4",
+        "https://v26-web.douyinvod.com/video/tos/watermark/video.mp4"
+      ]
+    },
+    "cover": {
+      "url_list": [
+        "//p3-sign.douyinpic.com/cover.jpeg"
+      ]
+    }
+  }
+}
