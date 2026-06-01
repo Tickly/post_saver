@@ -362,11 +362,52 @@ class DouyinParser(
 
         val candidates = listOfNotNull(
             pickBestVideoUrl(video.optJSONObject("play_addr")?.optJSONArray("url_list")),
+            pickBestVideoUrl(video.optJSONObject("play_addr_lowbr")?.optJSONArray("url_list")),
+            pickBestVideoUrl(video.optJSONObject("play_addr_h264")?.optJSONArray("url_list")),
+            pickBestVideoUrl(video.optJSONObject("play_addr_265")?.optJSONArray("url_list")),
             pickBestVideoUrl(video.optJSONObject("download_addr")?.optJSONArray("url_list")),
             pickBestVideoUrlFromBitRate(video.optJSONArray("bit_rate")),
         )
 
-        return candidates.firstOrNull { !isImageUrl(it) }
+        candidates.firstOrNull { !isImageUrl(it) }?.let { return it }
+
+        val playAddr = video.optJSONObject("play_addr")
+        val uri = playAddr?.optString("uri")?.takeIf { it.isNotBlank() }
+        if (uri != null) {
+            return normalizeVideoPlayUrl(buildPlayUrlFromVideoId(uri))
+        }
+        return null
+    }
+
+    /**
+     * 根据 video_id 构造无水印播放 API 地址。
+     *
+     * @param videoId 输入：play_addr.uri 或同类视频 ID。
+     * @return 输出：aweme play 接口 URL。
+     */
+    private fun buildPlayUrlFromVideoId(videoId: String): String {
+        return "https://aweme.snssdk.com/aweme/v1/play/?video_id=$videoId&ratio=720p&line=0"
+    }
+
+    /**
+     * 判断 URL 是否明显为带水印的视频地址。
+     *
+     * @param url 输入：候选播放 URL。
+     * @return 输出：true 表示路径含 watermark 或 playwm。
+     */
+    private fun isWatermarkedVideoUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains("watermark") || lower.contains("playwm")
+    }
+
+    /**
+     * 将 playwm 播放地址规范为 play（无水印 API 路径）。
+     *
+     * @param url 输入：原始视频 URL。
+     * @return 输出：规范化后的 URL。
+     */
+    private fun normalizeVideoPlayUrl(url: String): String {
+        return PLAYWM_PATTERN.replace(url, "play")
     }
 
     /**
@@ -511,15 +552,16 @@ class DouyinParser(
     }
 
     /**
-     * 从 url_list 中选取视频 URL（优先无 watermark）。
+     * 从 url_list 中选取视频 URL（优先无 watermark / playwm，并规范化 playwm→play）。
      *
      * @param urlList 输入：URL 数组。
      * @return 输出：视频 URL；列表为空时返回 null。
      */
     private fun pickBestVideoUrl(urlList: JSONArray?): String? {
         val normalized = collectUrls(urlList)
-        return normalized.firstOrNull { !it.contains("watermark", ignoreCase = true) }
+        val best = normalized.firstOrNull { !isWatermarkedVideoUrl(it) }
             ?: normalized.firstOrNull()
+        return best?.let { normalizeVideoPlayUrl(it) }
     }
 
     /**
@@ -564,6 +606,7 @@ class DouyinParser(
 
     companion object {
         private const val DOUYIN_REFERER = "https://www.douyin.com/"
+        private val PLAYWM_PATTERN = Regex("playwm", RegexOption.IGNORE_CASE)
         private val IMAGE_AWEME_TYPES = setOf(2, 68, 61)
         private val VIDEO_AWEME_TYPES = setOf(0, 4, 51, 107)
         private val IMAGE_URL_HINTS = listOf(".jpg", ".jpeg", ".webp", ".png", ".heic", "/image/")

@@ -40,6 +40,37 @@ class DouyinParserTest {
     }
 
     /**
+     * playwm API 地址应规范为 play 无水印播放链。
+     */
+    @Test
+    fun buildMediaItems_videoPost_playwmUrl_normalizedToPlay() {
+        val item = loadFixture("douyin_video_playwm.json")
+
+        assertEquals(DouyinParser.DouyinContentType.VIDEO, parser.classifyContentTypeForTest(item))
+
+        val mediaItems = parser.buildMediaItemsForTest(item)
+        assertEquals(1, mediaItems.size)
+        assertEquals(MediaType.VIDEO, mediaItems[0].type)
+        assertTrue(mediaItems[0].url.contains("/aweme/v1/play/"))
+        assertTrue(!mediaItems[0].url.contains("playwm", ignoreCase = true))
+        assertTrue(mediaItems[0].url.contains("v0300f9f0000bu3ctfaajd99kv7dbidg"))
+    }
+
+    /**
+     * url_list 为空时应由 play_addr.uri 构造 play 播放链。
+     */
+    @Test
+    fun buildMediaItems_videoPost_uriOnly_buildsPlayUrl() {
+        val item = loadFixture("douyin_video_uri_only.json")
+
+        val mediaItems = parser.buildMediaItemsForTest(item)
+        assertEquals(1, mediaItems.size)
+        assertEquals(MediaType.VIDEO, mediaItems[0].type)
+        assertTrue(mediaItems[0].url.contains("/aweme/v1/play/"))
+        assertTrue(mediaItems[0].url.contains("v0400abc0000testvideouri01"))
+    }
+
+    /**
      * 图文单图应识别为 IMAGE，优先 download_url_list。
      */
     @Test

@@ -26,13 +26,19 @@ class XiaohongshuParser(
      */
     override fun parse(url: String): ParseResult {
         val normalizedUrl = UrlNormalizer.normalize(url)
-        val resolvedUrl = resolveFinalUrl(normalizedUrl)
-        val noteId = extractNoteId(resolvedUrl)
+        val pageUrl = resolveFinalUrl(normalizedUrl)
+        val noteId = extractNoteId(pageUrl)
             ?: throw ParseException("无法从链接中提取笔记 ID")
 
-        val html = fetchHtml(buildExploreUrl(noteId, resolvedUrl))
-        parseInitialState(html, noteId)?.let { return it }
-        return parseOpenGraph(html, noteId)
+        val htmlMobile = fetchHtml(pageUrl, MOBILE_USER_AGENT)
+        parseInitialState(htmlMobile, noteId)?.let { return it }
+        parseImagesFromHtml(htmlMobile, noteId)?.let { return it }
+        runCatching { return parseOpenGraph(htmlMobile, noteId) }
+
+        val htmlDesktop = fetchHtml(pageUrl, DESKTOP_USER_AGENT)
+        parseInitialState(htmlDesktop, noteId)?.let { return it }
+        parseImagesFromHtml(htmlDesktop, noteId)?.let { return it }
+        return parseOpenGraph(htmlDesktop, noteId)
     }
 
     /**
@@ -43,7 +49,7 @@ class XiaohongshuParser(
      */
     private fun resolveFinalUrl(url: String): String {
         extractNoteId(url)?.let { noteId ->
-            return buildExploreUrl(noteId, url)
+            return buildNotePageUrl(noteId, url)
         }
 
         val request = Request.Builder()
@@ -56,7 +62,10 @@ class XiaohongshuParser(
             if (!response.isSuccessful && response.code !in 300..399) {
                 throw ParseException("链接访问失败（HTTP ${response.code}）")
             }
-            return response.request.url.toString()
+            val finalUrl = response.request.url.toString()
+            val noteId = extractNoteId(finalUrl)
+                ?: throw ParseException("短链跳转后无法提取笔记 ID")
+            return buildNotePageUrl(noteId, finalUrl)
         }
     }
 
@@ -85,22 +94,53 @@ class XiaohongshuParser(
      * @param originalUrl 输入：原始链接，用于保留 xsec_token 等参数。
      * @return 输出：探索页 URL。
      */
+    /**
+     * 构建笔记详情页 URL，优先保留短链跳转后的完整参数。
+     *
+     * @param noteId 输入：笔记 ID。
+     * @param originalUrl 输入：原始或跳转后的链接。
+     * @return 输出：用于拉取页面的 URL。
+     */
+    private fun buildNotePageUrl(noteId: String, originalUrl: String): String {
+        val base = originalUrl.substringBefore('#')
+        val lower = base.lowercase()
+        val onNotePage = lower.contains("/explore/$noteId") ||
+            lower.contains("/discovery/item/$noteId")
+        if (onNotePage && base.contains("xsec_token=", ignoreCase = true)) {
+            return base
+        }
+        return buildExploreUrl(noteId, originalUrl)
+    }
+
+    /**
+     * 构建 explore 页 URL，附带安全参数。
+     *
+     * @param noteId 输入：笔记 ID。
+     * @param originalUrl 输入：原始链接，用于提取 xsec_token 等参数。
+     * @return 输出：explore 页 URL。
+     */
     private fun buildExploreUrl(noteId: String, originalUrl: String): String {
-        val tokenMatch = Regex("""[?&]xsec_token=([^&]+)""").find(originalUrl)
-        val tokenSuffix = tokenMatch?.groupValues?.getOrNull(1)?.let { "?xsec_token=$it" }.orEmpty()
-        return "https://www.xiaohongshu.com/explore/$noteId$tokenSuffix"
+        val params = mutableListOf<String>()
+        for (name in listOf("xsec_token", "xsec_source")) {
+            Regex("""[?&]$name=([^&]+)""").find(originalUrl)?.groupValues?.getOrNull(1)?.let {
+                params.add("$name=$it")
+            }
+        }
+        val query = if (params.isNotEmpty()) "?${params.joinToString("&")}" else ""
+        return "https://www.xiaohongshu.com/explore/$noteId$query"
     }
 
     /**
      * 拉取 HTML 页面内容。
      *
      * @param url 输入：页面 URL。
+     * @param userAgent 输入：请求 User-Agent。
      * @return 输出：HTML 字符串。
      */
-    private fun fetchHtml(url: String): String {
+    private fun fetchHtml(url: String, userAgent: String = MOBILE_USER_AGENT): String {
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", MOBILE_USER_AGENT)
+            .header("User-Agent", userAgent)
             .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
             .header("Referer", "https://www.xiaohongshu.com/")
             .build()
@@ -195,11 +235,16 @@ class XiaohongshuParser(
      * @return 输出：可解析的 JSON 文本。
      */
     private fun sanitizeJson(raw: String): String {
-        return raw
+        var result = raw
             .trim()
             .trimEnd(';')
             .replace(":undefined", ":null")
             .replace(",undefined", ",null")
+            .replace("void 0", "null")
+        result = Regex("""\b!0\b""").replace(result, "true")
+        result = Regex("""\b!1\b""").replace(result, "false")
+        result = Regex(""",(\s*[}\]])""").replace(result, "$1")
+        return result
     }
 
     /**
@@ -210,12 +255,16 @@ class XiaohongshuParser(
      * @return 输出：笔记 JSON 对象；未找到时返回 null。
      */
     private fun findNoteObject(state: JSONObject, noteId: String): JSONObject? {
+        state.optJSONObject("noteData")?.optJSONObject("data")?.optJSONObject("noteData")?.let { noteData ->
+            if (isNotePayload(noteData)) return noteData
+        }
+
         val noteDetailMap = state.optJSONObject("note")?.optJSONObject("noteDetailMap")
             ?: state.optJSONObject("noteDetailMap")
 
         noteDetailMap?.optJSONObject(noteId)?.let { wrapper ->
             wrapper.optJSONObject("note")?.let { return it }
-            if (wrapper.has("title") || wrapper.has("desc") || wrapper.has("imageList")) {
+            if (isNotePayload(wrapper)) {
                 return wrapper
             }
         }
@@ -226,13 +275,24 @@ class XiaohongshuParser(
                 val key = keys.next()
                 val wrapper = noteDetailMap.optJSONObject(key) ?: continue
                 val note = wrapper.optJSONObject("note") ?: wrapper
-                if (note.has("imageList") || note.has("video") || note.has("desc")) {
+                if (isNotePayload(note)) {
                     return note
                 }
             }
         }
 
         return findNoteRecursive(state, noteId)
+    }
+
+    /**
+     * 判断 JSON 对象是否像笔记详情。
+     *
+     * @param json 输入：候选对象。
+     * @return 输出：true 表示包含笔记媒体或正文。
+     */
+    private fun isNotePayload(json: JSONObject): Boolean {
+        return json.has("imageList") || json.has("image_list") || json.has("images") ||
+            json.has("video") || json.has("desc")
     }
 
     /**
@@ -246,9 +306,7 @@ class XiaohongshuParser(
         when (json) {
             is JSONObject -> {
                 val currentId = json.optString("noteId", json.optString("id"))
-                if (currentId.equals(noteId, ignoreCase = true) &&
-                    (json.has("imageList") || json.has("video") || json.has("desc"))
-                ) {
+                if (currentId.equals(noteId, ignoreCase = true) && isNotePayload(json)) {
                     return json
                 }
                 val keys = json.keys()
@@ -272,6 +330,48 @@ class XiaohongshuParser(
      * @param noteId 输入：笔记 ID。
      * @return 输出：解析结果。
      */
+    /**
+     * 从 HTML 中按笔记 ID 附近片段提取图片 URL（INITIAL_STATE 解析失败时兜底）。
+     *
+     * @param html 输入：页面 HTML。
+     * @param noteId 输入：笔记 ID。
+     * @return 输出：解析结果；未找到图片时返回 null。
+     */
+    private fun parseImagesFromHtml(html: String, noteId: String): ParseResult? {
+        val anchor = html.indexOf(noteId)
+        if (anchor < 0) return null
+        val segmentStart = (anchor - 500).coerceAtLeast(0)
+        val segmentEnd = (anchor + 80_000).coerceAtMost(html.length)
+        val segment = html.substring(segmentStart, segmentEnd)
+
+        val imageUrls = IMAGE_URL_PATTERN.findAll(segment)
+            .map { it.groupValues[1] }
+            .filter { it.contains("xhscdn.com", ignoreCase = true) }
+            .distinct()
+            .toList()
+        if (imageUrls.isEmpty()) return null
+
+        val caption = extractMetaContent(html, "og:description")
+            ?: extractMetaContent(html, "description")
+            ?: ""
+        val author = extractMetaContent(html, "og:site_name")
+        val mediaItems = imageUrls.mapIndexed { index, imageUrl ->
+            MediaItem(
+                type = MediaType.IMAGE,
+                url = imageUrl,
+                previewUrl = imageUrl,
+                fileName = "xhs_${noteId}_${index + 1}.jpg",
+                referer = XHS_REFERER,
+            )
+        }
+        return ParseResult(
+            platform = Platform.XIAOHONGSHU,
+            caption = caption,
+            author = author,
+            mediaItems = mediaItems,
+        )
+    }
+
     private fun parseOpenGraph(html: String, noteId: String): ParseResult {
         val caption = extractMetaContent(html, "og:description")
             ?: extractMetaContent(html, "description")
@@ -328,6 +428,8 @@ class XiaohongshuParser(
             Regex("""<meta[^>]+property="$property"[^>]+content="([^"]+)"""", RegexOption.IGNORE_CASE),
             Regex("""<meta[^>]+content="([^"]+)"[^>]+property="$property"""", RegexOption.IGNORE_CASE),
             Regex("""<meta[^>]+name="$property"[^>]+content="([^"]+)"""", RegexOption.IGNORE_CASE),
+            Regex("""<meta[^>]+property='$property'[^>]+content='([^']+)'""", RegexOption.IGNORE_CASE),
+            Regex("""<meta[^>]+content='([^']+)'[^>]+property='$property'""", RegexOption.IGNORE_CASE),
         )
         for (pattern in patterns) {
             pattern.find(html)?.groupValues?.getOrNull(1)?.let { value ->
@@ -389,11 +491,15 @@ class XiaohongshuParser(
     private fun buildMediaItems(note: JSONObject, noteId: String): List<MediaItem> {
         val items = mutableListOf<MediaItem>()
 
-        val imageList = note.optJSONArray("imageList")
+        val imageList = resolveImageList(note)
         if (imageList != null && imageList.length() > 0) {
             for (index in 0 until imageList.length()) {
-                val imageObj = imageList.optJSONObject(index) ?: continue
-                val imageUrl = pickImageUrl(imageObj) ?: continue
+                val element = imageList.opt(index)
+                val imageUrl = when (element) {
+                    is String -> element.takeIf { it.startsWith("http") }
+                    is JSONObject -> pickImageUrl(element)
+                    else -> imageList.optString(index).takeIf { it.startsWith("http") }
+                } ?: continue
                 items.add(
                     MediaItem(
                         type = MediaType.IMAGE,
@@ -433,23 +539,63 @@ class XiaohongshuParser(
      * @param imageObj 输入：图片 JSON 对象。
      * @return 输出：图片 URL；未找到时返回 null。
      */
+    /**
+     * 解析笔记中的图片列表字段（兼容 camelCase / snake_case）。
+     *
+     * @param note 输入：笔记 JSON 对象。
+     * @return 输出：图片 JSON 数组；无图片列表时返回 null。
+     */
+    private fun resolveImageList(note: JSONObject): JSONArray? {
+        note.optJSONArray("imageList")?.takeIf { it.length() > 0 }?.let { return it }
+        note.optJSONArray("image_list")?.takeIf { it.length() > 0 }?.let { return it }
+        note.optJSONArray("images")?.takeIf { it.length() > 0 }?.let { return it }
+        return null
+    }
+
+    /**
+     * 从图片 JSON 中选取最佳 URL（优先高清 WB_DFT）。
+     *
+     * @param imageObj 输入：图片 JSON 对象。
+     * @return 输出：图片 URL；未找到时返回 null。
+     */
     private fun pickImageUrl(imageObj: JSONObject): String? {
+        pickUrlFromInfoList(imageObj.optJSONArray("infoList"))?.let { return it }
+        pickUrlFromInfoList(imageObj.optJSONArray("info_list"))?.let { return it }
+
         val candidates = listOf(
             imageObj.optString("urlDefault"),
+            imageObj.optString("url_default"),
             imageObj.optString("url"),
+            imageObj.optString("urlPre"),
+            imageObj.optString("url_pre"),
             imageObj.optString("original"),
             imageObj.optString("livePhoto"),
         ).filter { it.isNotBlank() }
 
-        imageObj.optJSONArray("infoList")?.let { infoList ->
-            for (index in 0 until infoList.length()) {
-                infoList.optJSONObject(index)?.optString("url")?.takeIf { it.isNotBlank() }?.let {
-                    return it
-                }
+        return candidates.firstOrNull()
+    }
+
+    /**
+     * 从 infoList 中优先选取 WB_DFT 场景的高清图。
+     *
+     * @param infoList 输入：infoList / info_list 数组。
+     * @return 输出：图片 URL；未找到时返回 null。
+     */
+    private fun pickUrlFromInfoList(infoList: JSONArray?): String? {
+        if (infoList == null || infoList.length() == 0) return null
+        var fallback: String? = null
+        for (index in 0 until infoList.length()) {
+            val info = infoList.optJSONObject(index) ?: continue
+            val url = info.optString("url").takeIf { it.isNotBlank() } ?: continue
+            val scene = info.optString("imageScene", info.optString("image_scene"))
+            if (scene.equals("WB_DFT", ignoreCase = true)) {
+                return url
+            }
+            if (fallback == null) {
+                fallback = url
             }
         }
-
-        return candidates.firstOrNull()
+        return fallback
     }
 
     /**
@@ -488,11 +634,42 @@ class XiaohongshuParser(
         return null
     }
 
+    /**
+     * 供单元测试调用：构建笔记页 URL。
+     *
+     * @param noteId 输入：笔记 ID。
+     * @param originalUrl 输入：原始或跳转后的链接。
+     * @return 输出：笔记页 URL。
+     */
+    internal fun buildNotePageUrlForTest(noteId: String, originalUrl: String): String {
+        return buildNotePageUrl(noteId, originalUrl)
+    }
+
+    /**
+     * 供单元测试调用：从 INITIAL_STATE 映射笔记。
+     *
+     * @param state 输入：页面状态 JSON 根对象。
+     * @param noteId 输入：笔记 ID。
+     * @return 输出：解析结果。
+     */
+    internal fun mapNoteFromStateForTest(state: JSONObject, noteId: String): ParseResult {
+        val note = findNoteObject(state, noteId)
+            ?: throw ParseException("页面中未找到笔记数据")
+        return mapNoteObject(note, noteId)
+    }
+
     companion object {
         private const val XHS_REFERER = "https://www.xiaohongshu.com/"
+        private val IMAGE_URL_PATTERN = Regex(
+            """"(?:urlDefault|url_default|urlPre|url_pre)"\s*:\s*"(https?://[^"]+)"""",
+            RegexOption.IGNORE_CASE,
+        )
         private const val MOBILE_USER_AGENT =
             "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 " +
                 "(KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+        private const val DESKTOP_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
         /**
          * 创建默认 OkHttp 客户端。

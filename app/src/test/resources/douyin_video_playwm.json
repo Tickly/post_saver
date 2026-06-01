@@ -1,0 +1,23 @@
+{
+  "aweme_id": "7987654321098765432",
+  "desc": "测试 playwm API 视频",
+  "aweme_type": 0,
+  "author": {
+    "nickname": "test_user"
+  },
+  "video": {
+    "duration": 12000,
+    "has_watermark": true,
+    "play_addr": {
+      "uri": "v0300f9f0000bu3ctfaajd99kv7dbidg",
+      "url_list": [
+        "https://aweme.snssdk.com/aweme/v1/playwm/?video_id=v0300f9f0000bu3ctfaajd99kv7dbidg&ratio=720p&line=0"
+      ]
+    },
+    "cover": {
+      "url_list": [
+        "https://p3-sign.douyinpic.com/cover.jpeg"
+      ]
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "aweme_id": "7876543210987654321",
+  "desc": "测试仅 uri 无 url_list",
+  "aweme_type": 0,
+  "author": {
+    "nickname": "test_user"
+  },
+  "video": {
+    "duration": 8000,
+    "play_addr": {
+      "uri": "v0400abc0000testvideouri01",
+      "url_list": []
+    },
+    "cover": {
+      "url_list": [
+        "https://p3-sign.douyinpic.com/cover2.jpeg"
+      ]
+    }
+  }
+}

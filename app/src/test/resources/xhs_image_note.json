@@ -1,0 +1,32 @@
+{
+  "note": {
+    "noteDetailMap": {
+      "69fdc0a60000000035023ceb": {
+        "note": {
+          "noteId": "69fdc0a60000000035023ceb",
+          "title": "Ranch day",
+          "desc": "Ranch day🐎",
+          "user": {
+            "nickname": "test_user"
+          },
+          "imageList": [
+            {
+              "urlDefault": "https://sns-webpic-qc.xhscdn.com/202501180028/9a9667b8e0ea82be10f388b8c279d9d4/spectrum/1040g0k031coeec8616005osp8qg9tcbj7tkmhh8!nc_n_webp_mw_1",
+              "urlPre": "https://sns-webpic-qc.xhscdn.com/202501180028/e8da355f0f66b93801735d44d2403f93/spectrum/1040g0k031coeec8616005osp8qg9tcbj7tkmhh8!nc_n_webp_prv_1",
+              "infoList": [
+                {
+                  "imageScene": "WB_PRV",
+                  "url": "https://sns-webpic-qc.xhscdn.com/202501180028/e8da355f0f66b93801735d44d2403f93/spectrum/1040g0k031coeec8616005osp8qg9tcbj7tkmhh8!nc_n_webp_prv_1"
+                },
+                {
+                  "imageScene": "WB_DFT",
+                  "url": "https://sns-webpic-qc.xhscdn.com/202501180028/9a9667b8e0ea82be10f388b8c279d9d4/spectrum/1040g0k031coeec8616005osp8qg9tcbj7tkmhh8!nc_n_webp_mw_1"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}
