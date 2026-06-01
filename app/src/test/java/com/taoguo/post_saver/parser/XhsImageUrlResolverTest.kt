@@ -33,6 +33,31 @@ class XhsImageUrlResolverTest {
     }
 
     /**
+     * 同笔记不同图应得到不同 imageIdentityKey。
+     */
+    @Test
+    fun imageIdentityKey_distinctFileIds_areUnique() {
+        val url1 =
+            "https://sns-webpic-qc.xhscdn.com/202606011137/a705d012/notes_pre_post/1040g3k031vtfvo2dis004a1b2t2hc4g7putpmjg!h5_1080jpg"
+        val url2 =
+            "https://sns-webpic-qc.xhscdn.com/202606011137/8a36e9fe/note_pre_post_uhdr/1040g3r831vtfji3v56og4a1b2t2hc4g7ft3trrg!h5_1080jpg"
+        assertTrue(XhsImageUrlResolver.imageIdentityKey(url1) != XhsImageUrlResolver.imageIdentityKey(url2))
+    }
+
+    /**
+     * h5_1080 应优先于 style 预览后缀。
+     */
+    @Test
+    fun pickBestDownloadUrl_prefersH5DetailOverStylePreview() {
+        val detail =
+            "http://sns-webpic-qc.xhscdn.com/202606011137/a705d012/notes_pre_post/1040g3k031vtfvo2dis004a1b2t2hc4g7putpmjg!h5_1080jpg"
+        val preview =
+            "http://sns-webpic-qc.xhscdn.com/202606011137/6d209222/notes_pre_post/1040g3k031vtfvo2dis004a1b2t2hc4g7putpmjg!style_d4c824bab532bfe9"
+        val best = XhsImageUrlResolver.pickBestDownloadUrl(listOf(preview, detail))
+        assertTrue(best != null && best.contains("h5_1080"))
+    }
+
+    /**
      * 下载候选列表应包含升级后的 URL。
      */
     @Test

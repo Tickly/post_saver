@@ -166,7 +166,7 @@ class XiaohongshuParser(
         val bestByKey = linkedMapOf<String, MediaItem>()
 
         fun absorbImage(item: MediaItem) {
-            val key = XhsImageUrlResolver.spectrumKey(item.url) ?: item.url
+            val key = XhsImageUrlResolver.imageIdentityKey(item.url) ?: item.url
             if (!order.contains(key)) {
                 order.add(key)
             }
@@ -679,8 +679,11 @@ class XiaohongshuParser(
      * @return 输出：去重后的图片列表（保持首次出现顺序）。
      */
     private fun dedupeImageItems(images: List<MediaItem>): List<MediaItem> {
-        val seenUrls = mutableSetOf<String>()
-        return images.filter { seenUrls.add(it.url) }
+        val seenKeys = mutableSetOf<String>()
+        return images.filter { item ->
+            val key = XhsImageUrlResolver.imageIdentityKey(item.url) ?: item.url
+            seenKeys.add(key)
+        }
     }
 
     /**
@@ -762,6 +765,21 @@ class XiaohongshuParser(
      * @return 输出：图片 URL；未找到时返回 null。
      */
     private fun pickImageUrl(imageObj: JSONObject): String? {
+        val detailScenes = setOf("H5_DTL", "WB_DFT", "WB_DFT_HD")
+        listOf(
+            imageObj.optJSONArray("infoList"),
+            imageObj.optJSONArray("info_list"),
+        ).forEach { infoList ->
+            if (infoList == null) return@forEach
+            for (index in 0 until infoList.length()) {
+                val info = infoList.optJSONObject(index) ?: continue
+                val scene = info.optString("imageScene", info.optString("image_scene"))
+                val url = info.optString("url")
+                if (url.isNotBlank() && detailScenes.contains(scene)) {
+                    return url
+                }
+            }
+        }
         val candidates = mutableListOf<String>()
         listOf(
             imageObj.optJSONArray("infoList"),
@@ -780,9 +798,10 @@ class XiaohongshuParser(
             "url",
             "original",
             "livePhoto",
-            "urlPre",
-            "url_pre",
         ).forEach { field ->
+            imageObj.optString(field).takeIf { it.isNotBlank() }?.let { candidates.add(it) }
+        }
+        listOf("urlPre", "url_pre").forEach { field ->
             imageObj.optString(field).takeIf { it.isNotBlank() }?.let { candidates.add(it) }
         }
         return XhsImageUrlResolver.pickBestDownloadUrl(candidates)

@@ -7,7 +7,7 @@ Android 原生 App，基于个人 Android 项目模板创建，已集成 GitHub 
 - **应用名**：作品下载助手
 - **applicationId**：`com.taoguo.post_saver`
 - **Gradle 项目名**：`post-saver`
-- **入口**：单 Activity 占位界面，居中显示欢迎文案
+- **入口**：单 Activity 主界面，粘贴分享链接解析并下载媒体
 
 ## 包名命名规范
 
@@ -97,6 +97,31 @@ getByName("debug") {
 - [app/src/main/res/values/ic_launcher_background.xml](app/src/main/res/values/ic_launcher_background.xml)
 
 建议使用 Android Studio **Image Asset**（`File → New → Image Asset`）一键生成全套 `mipmap-*dpi` 资源。
+
+## 主界面与列表（UI 约定）
+
+可下载资源列表的展示方式有明确要求，后续改界面时请遵守：
+
+| 要求 | 说明 |
+|------|------|
+| **整页单一滚动** | 主界面使用一个外层 `ScrollView`，输入区、解析结果、资源条目在同一滚动区域内上下浏览。 |
+| **禁止局部滚动** | 不要在 `ScrollView` 内再嵌套 `RecyclerView`（或其它可独立滚动的列表容器）作为「可下载资源」区域；避免内层列表只显示部分条目、与外层形成两套滚动。 |
+| **资源区为平铺列表** | 每条可下载资源对应 `item_media_result` 一行，由 `LinearLayout`（`layoutMediaList`）动态添加子视图；实现见 [MediaResultListView.kt](app/src/main/java/com/taoguo/post_saver/ui/MediaResultListView.kt)。 |
+
+当前布局结构示意：
+
+```
+ScrollView（整页滚动）
+├── 链接输入、粘贴 / 解析、调试 JSON 等
+└── 解析结果区
+    ├── 文案、作者、一键下载全部
+    └── layoutMediaList（垂直 LinearLayout）
+        ├── 资源 1
+        ├── 资源 2
+        └── …
+```
+
+若需改为「全屏仅一个 `RecyclerView`、输入区作列表头」等其它形态，应先更新本节约定再改代码。
 
 ## 可选调整
 

@@ -137,6 +137,18 @@ class XiaohongshuParserTest {
     }
 
     /**
+     * Ranch day 九图应优先 H5_DTL（h5_1080），且仍为 9 条。
+     */
+    @Test
+    fun mapNoteFromState_ranchDay9_prefersH5DetailUrl() {
+        val state = loadFixture("xhs_ranch_day_9.json")
+        val result = parser.mapNoteFromStateForTest(state, "69fdc0a60000000035023ceb")
+        assertEquals(9, result.mediaItems.size)
+        assertTrue(result.mediaItems.all { it.url.contains("h5_1080") })
+        assertTrue(result.mediaItems.none { it.url.contains("!style_") })
+    }
+
+    /**
      * HTML 兜底仅匹配 urlDefault，同图 urlPre 不应额外计入。
      */
     @Test

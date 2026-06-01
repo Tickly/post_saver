@@ -9,17 +9,16 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import com.taoguo.post_saver.debug.ParseDebugStore
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.LinearLayoutManager
 import com.taoguo.post_saver.databinding.ActivityMainBinding
+import com.taoguo.post_saver.debug.ParseDebugStore
 import com.taoguo.post_saver.download.MediaDownloader
 import com.taoguo.post_saver.model.MediaItem
 import com.taoguo.post_saver.model.ParseResult
 import com.taoguo.post_saver.parser.ParseException
 import com.taoguo.post_saver.parser.ParserRegistry
 import com.taoguo.post_saver.parser.UnsupportedPlatformException
-import com.taoguo.post_saver.ui.MediaResultAdapter
+import com.taoguo.post_saver.ui.MediaResultListView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,7 +29,7 @@ import kotlinx.coroutines.withContext
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private lateinit var mediaAdapter: MediaResultAdapter
+    private lateinit var mediaListView: MediaResultListView
     private lateinit var mediaDownloader: MediaDownloader
     private var currentMediaItems: List<MediaItem> = emptyList()
     private var isBatchDownloading = false
@@ -47,21 +46,21 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         mediaDownloader = MediaDownloader(this)
-        setupRecyclerView()
+        setupMediaListView()
         setupClickListeners()
     }
 
     /**
-     * 初始化媒体结果列表。
+     * 初始化可下载资源平铺列表。
      *
      * @return 输出：无返回值。
      */
-    private fun setupRecyclerView() {
-        mediaAdapter = MediaResultAdapter { item, position ->
-            downloadMediaItem(item, position)
-        }
-        binding.recyclerMedia.layoutManager = LinearLayoutManager(this)
-        binding.recyclerMedia.adapter = mediaAdapter
+    private fun setupMediaListView() {
+        mediaListView = MediaResultListView(
+            container = binding.layoutMediaList,
+            inflater = layoutInflater,
+            onDownloadClick = { item, position -> downloadMediaItem(item, position) },
+        )
     }
 
     /**
@@ -176,14 +175,14 @@ class MainActivity : AppCompatActivity() {
      */
     private fun downloadMediaItem(item: MediaItem, position: Int) {
         if (isBatchDownloading) return
-        mediaAdapter.setDownloading(position, true)
+        mediaListView.setDownloading(position, true)
 
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching { mediaDownloader.download(item) }
             }
 
-            mediaAdapter.setDownloading(position, false)
+            mediaListView.setDownloading(position, false)
 
             result.onSuccess { path ->
                 Toast.makeText(
@@ -218,11 +217,11 @@ class MainActivity : AppCompatActivity() {
             var successCount = 0
             var failedCount = 0
             for ((index, item) in currentMediaItems.withIndex()) {
-                mediaAdapter.setDownloading(index, true)
+                mediaListView.setDownloading(index, true)
                 val result = withContext(Dispatchers.IO) {
                     runCatching { mediaDownloader.download(item) }
                 }
-                mediaAdapter.setDownloading(index, false)
+                mediaListView.setDownloading(index, false)
                 if (result.isSuccess) {
                     successCount++
                 } else {
@@ -256,7 +255,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         currentMediaItems = result.mediaItems
-        mediaAdapter.submitList(currentMediaItems)
+        mediaListView.submitList(currentMediaItems)
         binding.buttonDownloadAll.visibility =
             if (currentMediaItems.isNotEmpty()) View.VISIBLE else View.GONE
         Toast.makeText(
@@ -296,7 +295,7 @@ class MainActivity : AppCompatActivity() {
         binding.layoutResult.visibility = View.GONE
         binding.buttonDownloadAll.visibility = View.GONE
         currentMediaItems = emptyList()
-        mediaAdapter.submitList(emptyList())
+        mediaListView.clear()
     }
 
     /**

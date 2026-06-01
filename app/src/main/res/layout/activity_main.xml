@@ -150,14 +150,12 @@
 
             </LinearLayout>
 
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/recyclerMedia"
+            <LinearLayout
+                android:id="@+id/layoutMediaList"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:nestedScrollingEnabled="false"
-                tools:itemCount="2"
-                tools:listitem="@layout/item_media_result" />
+                android:orientation="vertical" />
 
         </LinearLayout>
 

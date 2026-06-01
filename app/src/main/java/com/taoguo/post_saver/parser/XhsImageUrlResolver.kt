@@ -6,6 +6,10 @@ package com.taoguo.post_saver.parser
 object XhsImageUrlResolver {
 
     private val SPECTRUM_KEY_PATTERN = Regex("""/spectrum/([^!/]+)""", RegexOption.IGNORE_CASE)
+    private val FILE_ID_PATTERN = Regex(
+        """(?:notes_pre_post|note_pre_post_uhdr|spectrum)/([^!?/]+)""",
+        RegexOption.IGNORE_CASE,
+    )
     private val CI_PATH_PATTERN = Regex(
         """xhscdn\.com/\d+/[a-f0-9]+/(.+?)(?:!|$)""",
         RegexOption.IGNORE_CASE,
@@ -19,6 +23,19 @@ object XhsImageUrlResolver {
      */
     fun spectrumKey(url: String): String? {
         return SPECTRUM_KEY_PATTERN.find(url)?.groupValues?.getOrNull(1)
+    }
+
+    /**
+     * 提取图片在笔记中的唯一标识（fileId / spectrum），用于合并与去重。
+     *
+     * @param url 输入：图片 URL。
+     * @return 输出：唯一键；无法提取时返回 null。
+     */
+    fun imageIdentityKey(url: String): String? {
+        FILE_ID_PATTERN.find(url)?.let { match ->
+            return "${match.groupValues[0]}"
+        }
+        return spectrumKey(url)
     }
 
     /**
@@ -53,7 +70,9 @@ object XhsImageUrlResolver {
      */
     fun isPreviewUrl(url: String): Boolean {
         val lower = url.lowercase()
-        return lower.contains("webp_prv") || lower.contains("!nc_n_webp_prv")
+        return lower.contains("webp_prv") ||
+            lower.contains("!nc_n_webp_prv") ||
+            lower.contains("!style_")
     }
 
     /**
@@ -107,8 +126,11 @@ object XhsImageUrlResolver {
     private fun downloadUrlRank(url: String): Int {
         var score = 0
         if (!isPreviewUrl(url)) score += 100
+        if (url.contains("h5_1080", ignoreCase = true)) score += 80
         if (url.contains("webp_mw", ignoreCase = true)) score += 50
+        if (url.contains("WB_DFT", ignoreCase = true)) score += 40
         if (url.contains("ci.xiaohongshu.com", ignoreCase = true)) score += 30
+        if (url.contains("!style_", ignoreCase = true)) score -= 60
         score += url.length.coerceAtMost(200)
         return score
     }
