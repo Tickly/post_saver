@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import com.taoguo.post_saver.model.MediaItem
 import com.taoguo.post_saver.model.MediaType
 import com.taoguo.post_saver.parser.UrlNormalizer
+import com.taoguo.post_saver.parser.XhsImageUrlResolver
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
@@ -64,8 +65,40 @@ class MediaDownloader(
      * @throws Exception 下载或写入失败时抛出。
      */
     fun download(item: MediaItem): String {
-        val referer = item.referer ?: UrlNormalizer.refererFor(item.url)
-        val downloadUrl = UrlNormalizer.normalize(item.url)
+        val candidates = resolveDownloadCandidates(item)
+        var lastError: Exception? = null
+        for (downloadUrl in candidates) {
+            try {
+                return downloadFromUrl(downloadUrl, item)
+            } catch (error: Exception) {
+                lastError = error
+            }
+        }
+        throw lastError ?: IllegalStateException("下载失败")
+    }
+
+    /**
+     * 解析单条媒体的下载候选 URL 列表。
+     *
+     * @param item 输入：媒体资源。
+     * @return 输出：按优先级排序的 URL 列表。
+     */
+    private fun resolveDownloadCandidates(item: MediaItem): List<String> {
+        if (item.type == MediaType.IMAGE && item.url.contains("xhscdn", ignoreCase = true)) {
+            return XhsImageUrlResolver.getDownloadCandidates(item.url)
+        }
+        return listOf(UrlNormalizer.normalize(item.url))
+    }
+
+    /**
+     * 从指定 URL 下载媒体并写入相册。
+     *
+     * @param downloadUrl 输入：下载地址。
+     * @param item 输入：媒体资源元数据。
+     * @return 输出：保存后的相对路径描述。
+     */
+    private fun downloadFromUrl(downloadUrl: String, item: MediaItem): String {
+        val referer = item.referer ?: UrlNormalizer.refererFor(downloadUrl)
         val request = Request.Builder()
             .url(downloadUrl)
             .header(
@@ -74,13 +107,18 @@ class MediaDownloader(
                     "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
             )
             .header("Referer", referer)
+            .header("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
             .build()
 
         val bytes = client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 throw IllegalStateException("下载失败（HTTP ${response.code}）")
             }
-            response.body?.bytes() ?: throw IllegalStateException("下载内容为空")
+            val body = response.body?.bytes() ?: throw IllegalStateException("下载内容为空")
+            if (body.isEmpty()) {
+                throw IllegalStateException("下载内容为空")
+            }
+            body
         }
 
         val fileName = item.fileName ?: defaultFileName(item)

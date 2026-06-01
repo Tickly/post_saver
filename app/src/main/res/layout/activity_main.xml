@@ -54,6 +54,16 @@
             app:layout_constraintStart_toEndOf="@id/buttonPaste"
             app:layout_constraintTop_toBottomOf="@id/inputLayoutLink" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonViewDebugJson"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/btn_view_debug_json"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/buttonParse" />
+
         <ProgressBar
             android:id="@+id/progressParsing"
             android:layout_width="wrap_content"
@@ -62,7 +72,7 @@
             android:visibility="gone"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/buttonParse"
+            app:layout_constraintTop_toBottomOf="@id/buttonViewDebugJson"
             tools:visibility="visible" />
 
         <TextView

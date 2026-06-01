@@ -11,6 +11,7 @@ object UrlNormalizer {
         "xhslink.com",
         "xiaohongshu.com",
         "xhscdn.com",
+        "ci.xiaohongshu.com",
         "douyin.com",
         "iesdouyin.com",
         "douyincdn.com",

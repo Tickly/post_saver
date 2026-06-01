@@ -1,5 +1,7 @@
 package com.taoguo.post_saver.parser
 
+import com.taoguo.post_saver.debug.ParseDebugJson
+import com.taoguo.post_saver.debug.ParseDebugStore
 import com.taoguo.post_saver.model.MediaItem
 import com.taoguo.post_saver.model.MediaType
 import com.taoguo.post_saver.model.ParseResult
@@ -25,18 +27,104 @@ class XiaohongshuParser(
      * @throws ParseException 解析失败时抛出。
      */
     override fun parse(url: String): ParseResult {
-        val normalizedUrl = UrlNormalizer.normalize(url)
-        val pageUrl = resolveFinalUrl(normalizedUrl)
-        val noteId = extractNoteId(pageUrl)
-            ?: throw ParseException("无法从链接中提取笔记 ID")
+        val debug = JSONObject()
+        try {
+            val normalizedUrl = UrlNormalizer.normalize(url)
+            val pageUrl = resolveFinalUrl(normalizedUrl)
+            val noteId = extractNoteId(pageUrl)
+                ?: throw ParseException("无法从链接中提取笔记 ID")
+            debug.put("inputUrl", normalizedUrl)
 
-        val htmlMobile = fetchHtml(pageUrl, MOBILE_USER_AGENT)
-        tryParseNoteFromHtml(htmlMobile, noteId)?.let { return it }
-        runCatching { return parseOpenGraph(htmlMobile, noteId) }
+            val htmlMobile = fetchHtml(pageUrl, MOBILE_USER_AGENT)
+            tryParseNoteFromHtml(htmlMobile, noteId)?.let { result ->
+                saveDebugJson(debug, pageUrl, noteId, htmlMobile, result, "mobileHtml")
+                return result
+            }
+            runCatching {
+                val result = parseOpenGraph(htmlMobile, noteId)
+                saveDebugJson(debug, pageUrl, noteId, htmlMobile, result, "mobileOpenGraph")
+                return result
+            }
 
-        val htmlDesktop = fetchHtml(pageUrl, DESKTOP_USER_AGENT)
-        tryParseNoteFromHtml(htmlDesktop, noteId)?.let { return it }
-        return parseOpenGraph(htmlDesktop, noteId)
+            val htmlDesktop = fetchHtml(pageUrl, DESKTOP_USER_AGENT)
+            tryParseNoteFromHtml(htmlDesktop, noteId)?.let { result ->
+                saveDebugJson(debug, pageUrl, noteId, htmlDesktop, result, "desktopHtml")
+                return result
+            }
+            val result = parseOpenGraph(htmlDesktop, noteId)
+            saveDebugJson(debug, pageUrl, noteId, htmlDesktop, result, "desktopOpenGraph")
+            return result
+        } catch (error: Exception) {
+            debug.put("error", error.message ?: error.javaClass.simpleName)
+            ParseDebugStore.set(debug.toString(2))
+            throw error
+        }
+    }
+
+    /**
+     * 记录本次解析的调试 JSON 并写入全局缓存。
+     *
+     * @param debug 输入：调试 JSON 根对象。
+     * @param pageUrl 输入：笔记页 URL。
+     * @param noteId 输入：笔记 ID。
+     * @param html 输入：用于解析的 HTML。
+     * @param result 输入：解析结果。
+     * @param parseSource 输入：解析来源标识。
+     * @return 输出：无返回值。
+     */
+    private fun saveDebugJson(
+        debug: JSONObject,
+        pageUrl: String,
+        noteId: String,
+        html: String,
+        result: ParseResult,
+        parseSource: String,
+    ) {
+        val rawInitial = extractInitialStateJson(html)
+        val note = rawInitial?.let { raw ->
+            runCatching {
+                findNoteObject(JSONObject(sanitizeJson(raw)), noteId)
+            }.getOrNull()
+        }
+        val htmlImageUrls = extractHtmlImageUrlsForDebug(html, noteId)
+        ParseDebugJson.putXhsFields(
+            debug,
+            pageUrl,
+            noteId,
+            parseSource,
+            note,
+            rawInitial,
+            htmlImageUrls,
+        )
+        ParseDebugJson.putParseResult(debug, result)
+        ParseDebugStore.set(debug.toString(2))
+    }
+
+    /**
+     * 从 HTML 提取 urlDefault 列表（仅供调试展示）。
+     *
+     * @param html 输入：页面 HTML。
+     * @param noteId 输入：笔记 ID。
+     * @return 输出：图片 URL 列表。
+     */
+    private fun extractHtmlImageUrlsForDebug(html: String, noteId: String): List<String> {
+        val anchor = html.indexOf(noteId)
+        if (anchor < 0) return emptyList()
+        val segmentStart = (anchor - 500).coerceAtLeast(0)
+        val segmentEnd = (anchor + 200_000).coerceAtMost(html.length)
+        val segment = html.substring(segmentStart, segmentEnd)
+        val pattern = Regex(
+            """"(?:urlDefault|url_default)"\s*:\s*"(https?://[^"]+)"""",
+            RegexOption.IGNORE_CASE,
+        )
+        val seen = linkedSetOf<String>()
+        for (match in pattern.findAll(segment)) {
+            val url = match.groupValues[1]
+            if (url.contains("xhscdn.com", ignoreCase = true)) {
+                seen.add(url)
+            }
+        }
+        return seen.toList()
     }
 
     /**
@@ -50,30 +138,76 @@ class XiaohongshuParser(
         val stateResult = parseInitialState(html, noteId)
         val htmlImageResult = parseImagesFromHtml(html, noteId)
         if (stateResult != null && htmlImageResult != null) {
-            return mergeParseResults(stateResult, htmlImageResult)
+            return mergeParseResults(stateResult, htmlImageResult, noteId)
         }
         return stateResult ?: htmlImageResult
     }
 
     /**
-     * 合并 INITIAL_STATE 与 HTML 兜底结果，保留更完整的媒体列表与文案。
+     * 合并 INITIAL_STATE 与 HTML 兜底结果，按图片合并最佳下载 URL。
      *
      * @param stateResult 输入：INITIAL_STATE 解析结果。
      * @param htmlResult 输入：HTML 内嵌 URL 解析结果。
+     * @param noteId 输入：笔记 ID。
      * @return 输出：合并后的解析结果。
      */
-    private fun mergeParseResults(stateResult: ParseResult, htmlResult: ParseResult): ParseResult {
-        val mediaItems = if (htmlResult.mediaItems.size > stateResult.mediaItems.size) {
-            htmlResult.mediaItems
-        } else {
-            stateResult.mediaItems
+    private fun mergeParseResults(
+        stateResult: ParseResult,
+        htmlResult: ParseResult,
+        noteId: String,
+    ): ParseResult {
+        val stateImages = stateResult.mediaItems.filter { it.type == MediaType.IMAGE }
+        val htmlImages = htmlResult.mediaItems.filter { it.type == MediaType.IMAGE }
+        val videos = (stateResult.mediaItems + htmlResult.mediaItems)
+            .filter { it.type == MediaType.VIDEO }
+            .distinctBy { it.url }
+
+        val order = mutableListOf<String>()
+        val bestByKey = linkedMapOf<String, MediaItem>()
+
+        fun absorbImage(item: MediaItem) {
+            val key = XhsImageUrlResolver.spectrumKey(item.url) ?: item.url
+            if (!order.contains(key)) {
+                order.add(key)
+            }
+            val downloadUrl = resolveDownloadUrl(item.url)
+            val normalized = item.copy(
+                url = downloadUrl,
+                previewUrl = item.previewUrl ?: item.url,
+            )
+            val existing = bestByKey[key]
+            if (existing == null) {
+                bestByKey[key] = normalized
+            } else {
+                val betterUrl = XhsImageUrlResolver.preferBetter(existing.url, downloadUrl)
+                bestByKey[key] = existing.copy(
+                    url = betterUrl,
+                    previewUrl = existing.previewUrl ?: normalized.previewUrl,
+                )
+            }
         }
+
+        stateImages.forEach { absorbImage(it) }
+        htmlImages.forEach { absorbImage(it) }
+
+        val mergedImages = order.mapNotNull { bestByKey[it] }
         return ParseResult(
             platform = stateResult.platform,
             caption = stateResult.caption.ifBlank { htmlResult.caption },
             author = stateResult.author ?: htmlResult.author,
-            mediaItems = mediaItems,
+            mediaItems = finalizeMediaItems(mergedImages + videos, noteId),
         )
+    }
+
+    /**
+     * 将解析 URL 规范为优先可下载的高清地址。
+     *
+     * @param url 输入：原始图片 URL。
+     * @return 输出：用于下载的 URL。
+     */
+    private fun resolveDownloadUrl(url: String): String {
+        return XhsImageUrlResolver.pickBestDownloadUrl(XhsImageUrlResolver.getDownloadCandidates(url))
+            ?: XhsImageUrlResolver.upgradePreviewToHd(url)
     }
 
     /**
@@ -393,7 +527,7 @@ class XiaohongshuParser(
         val rawItems = imageUrls.map { imageUrl ->
             MediaItem(
                 type = MediaType.IMAGE,
-                url = imageUrl,
+                url = resolveDownloadUrl(imageUrl),
                 previewUrl = imageUrl,
                 fileName = "xhs_${noteId}_tmp.jpg",
                 referer = XHS_REFERER,
@@ -528,7 +662,12 @@ class XiaohongshuParser(
         val videos = items.filter { it.type == MediaType.VIDEO }
         val dedupedImages = dedupeImageItems(items.filter { it.type == MediaType.IMAGE })
         val images = dedupedImages.mapIndexed { index, item ->
-            item.copy(fileName = "xhs_${noteId}_${index + 1}.jpg")
+            val downloadUrl = resolveDownloadUrl(item.url)
+            item.copy(
+                url = downloadUrl,
+                previewUrl = item.previewUrl ?: item.url,
+                fileName = "xhs_${noteId}_${index + 1}.jpg",
+            )
         }
         return images + videos
     }
@@ -542,17 +681,6 @@ class XiaohongshuParser(
     private fun dedupeImageItems(images: List<MediaItem>): List<MediaItem> {
         val seenUrls = mutableSetOf<String>()
         return images.filter { seenUrls.add(it.url) }
-    }
-
-    /**
-     * 判断 URL 是否为小红书预览图（通常不适合下载）。
-     *
-     * @param url 输入：图片 URL。
-     * @return 输出：true 表示预览图。
-     */
-    private fun isPreviewImageUrl(url: String): Boolean {
-        val lower = url.lowercase()
-        return lower.contains("webp_prv") || lower.contains("!nc_n_webp_prv")
     }
 
     /**
@@ -574,10 +702,11 @@ class XiaohongshuParser(
                     is JSONObject -> pickImageUrl(element)
                     else -> imageList.optString(index).takeIf { it.startsWith("http") }
                 } ?: continue
+                val downloadUrl = resolveDownloadUrl(imageUrl)
                 items.add(
                     MediaItem(
                         type = MediaType.IMAGE,
-                        url = imageUrl,
+                        url = downloadUrl,
                         previewUrl = imageUrl,
                         fileName = "xhs_${noteId}_${index + 1}.jpg",
                         referer = XHS_REFERER,
@@ -633,44 +762,30 @@ class XiaohongshuParser(
      * @return 输出：图片 URL；未找到时返回 null。
      */
     private fun pickImageUrl(imageObj: JSONObject): String? {
-        pickUrlFromInfoList(imageObj.optJSONArray("infoList"))?.let { return it }
-        pickUrlFromInfoList(imageObj.optJSONArray("info_list"))?.let { return it }
-
-        val candidates = listOf(
-            imageObj.optString("urlDefault"),
-            imageObj.optString("url_default"),
-            imageObj.optString("url"),
-            imageObj.optString("original"),
-            imageObj.optString("livePhoto"),
-            imageObj.optString("urlPre"),
-            imageObj.optString("url_pre"),
-        ).filter { it.isNotBlank() }
-
-        return candidates.firstOrNull { !isPreviewImageUrl(it) }
-            ?: candidates.firstOrNull()
-    }
-
-    /**
-     * 从 infoList 中选取图片 URL（优先 WB_DFT 高清，否则取任意可用地址）。
-     *
-     * @param infoList 输入：infoList / info_list 数组。
-     * @return 输出：图片 URL；未找到时返回 null。
-     */
-    private fun pickUrlFromInfoList(infoList: JSONArray?): String? {
-        if (infoList == null || infoList.length() == 0) return null
-        var fallback: String? = null
-        for (index in 0 until infoList.length()) {
-            val info = infoList.optJSONObject(index) ?: continue
-            val url = info.optString("url").takeIf { it.isNotBlank() } ?: continue
-            val scene = info.optString("imageScene", info.optString("image_scene"))
-            if (scene.equals("WB_DFT", ignoreCase = true)) {
-                return url
-            }
-            if (fallback == null) {
-                fallback = url
+        val candidates = mutableListOf<String>()
+        listOf(
+            imageObj.optJSONArray("infoList"),
+            imageObj.optJSONArray("info_list"),
+        ).forEach { infoList ->
+            if (infoList == null) return@forEach
+            for (index in 0 until infoList.length()) {
+                infoList.optJSONObject(index)?.optString("url")?.takeIf { it.isNotBlank() }?.let {
+                    candidates.add(it)
+                }
             }
         }
-        return fallback
+        listOf(
+            "urlDefault",
+            "url_default",
+            "url",
+            "original",
+            "livePhoto",
+            "urlPre",
+            "url_pre",
+        ).forEach { field ->
+            imageObj.optString(field).takeIf { it.isNotBlank() }?.let { candidates.add(it) }
+        }
+        return XhsImageUrlResolver.pickBestDownloadUrl(candidates)
     }
 
     /**
@@ -762,8 +877,12 @@ class XiaohongshuParser(
      * @param htmlResult 输入：HTML 解析结果。
      * @return 输出：合并后的解析结果。
      */
-    internal fun mergeParseResultsForTest(stateResult: ParseResult, htmlResult: ParseResult): ParseResult {
-        return mergeParseResults(stateResult, htmlResult)
+    internal fun mergeParseResultsForTest(
+        stateResult: ParseResult,
+        htmlResult: ParseResult,
+        noteId: String = "69fdc0a60000000035023ceb",
+    ): ParseResult {
+        return mergeParseResults(stateResult, htmlResult, noteId)
     }
 
     companion object {

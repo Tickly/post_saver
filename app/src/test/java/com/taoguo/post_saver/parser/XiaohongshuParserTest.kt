@@ -101,13 +101,13 @@ class XiaohongshuParserTest {
     }
 
     /**
-     * HTML 图多于 INITIAL_STATE 时应采用 HTML 列表。
+     * HTML 与 INITIAL_STATE 合并时应保留全部不重复图片。
      */
     @Test
-    fun mergeParseResults_htmlHasMoreImages_usesHtmlList() {
+    fun mergeParseResults_combinesUniqueImagesFromBothSources() {
         val noteId = "69fdc0a60000000035023ceb"
         val state = parser.mapNoteFromStateForTest(loadFixture("xhs_carousel_7.json"), noteId)
-        val htmlItems = (1..9).map { index ->
+        val htmlItems = (8..9).map { index ->
             MediaItem(
                 type = MediaType.IMAGE,
                 url = "https://sns-webpic-qc.xhscdn.com/202501180028/a$index/spectrum/img$index!nc_n_webp_mw_1",
@@ -119,9 +119,21 @@ class XiaohongshuParserTest {
             caption = "",
             mediaItems = htmlItems,
         )
-        val merged = parser.mergeParseResultsForTest(state, htmlResult)
+        val merged = parser.mergeParseResultsForTest(state, htmlResult, noteId)
         assertEquals(9, merged.mediaItems.size)
         assertEquals("Ranch day", merged.caption)
+    }
+
+    /**
+     * 仅含预览地址的图片位应输出高清下载 URL。
+     */
+    @Test
+    fun mapNoteFromState_carousel9_previewSlotsUseHdUrl() {
+        val state = loadFixture("xhs_carousel_9.json")
+        val result = parser.mapNoteFromStateForTest(state, "69fdc0a60000000035023ceb")
+        assertEquals(9, result.mediaItems.size)
+        val previewOnly = result.mediaItems.takeLast(2)
+        assertTrue(previewOnly.all { !it.url.contains("webp_prv") })
     }
 
     /**

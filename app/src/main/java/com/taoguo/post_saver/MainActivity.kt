@@ -1,10 +1,15 @@
 package com.taoguo.post_saver
 
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.os.Bundle
 import android.view.View
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.taoguo.post_saver.debug.ParseDebugStore
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.taoguo.post_saver.databinding.ActivityMainBinding
@@ -68,6 +73,50 @@ class MainActivity : AppCompatActivity() {
         binding.buttonPaste.setOnClickListener { pasteFromClipboard() }
         binding.buttonParse.setOnClickListener { parseInputText() }
         binding.buttonDownloadAll.setOnClickListener { downloadAllMediaItems() }
+        binding.buttonViewDebugJson.setOnClickListener { showDebugJsonDialog() }
+    }
+
+    /**
+     * 弹出对话框展示最近一次解析的调试 JSON，并支持复制。
+     *
+     * @return 输出：无返回值。
+     */
+    private fun showDebugJsonDialog() {
+        val json = ParseDebugStore.get()
+        if (json.isNullOrBlank()) {
+            Toast.makeText(this, R.string.msg_debug_json_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val textView = TextView(this).apply {
+            text = json
+            textSize = 11f
+            setTextIsSelectable(true)
+            val padding = (16 * resources.displayMetrics.density).toInt()
+            setPadding(padding, padding, padding, padding)
+        }
+        val scrollView = ScrollView(this).apply {
+            addView(textView)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_debug_json_title)
+            .setView(scrollView)
+            .setPositiveButton(R.string.btn_debug_json_copy) { _, _ ->
+                copyDebugJsonToClipboard(json)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /**
+     * 将调试 JSON 复制到系统剪贴板。
+     *
+     * @param json 输入：JSON 文本。
+     * @return 输出：无返回值。
+     */
+    private fun copyDebugJsonToClipboard(json: String) {
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText("parse_debug", json))
+        Toast.makeText(this, R.string.msg_debug_json_copied, Toast.LENGTH_SHORT).show()
     }
 
     /**

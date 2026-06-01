@@ -9,6 +9,11 @@
     <string name="btn_downloading">下载中…</string>
     <string name="btn_download_all">一键下载全部</string>
     <string name="btn_download_all_running">正在下载…</string>
+    <string name="btn_view_debug_json">查看解析 JSON</string>
+    <string name="btn_debug_json_copy">复制到剪贴板</string>
+    <string name="dialog_debug_json_title">解析调试 JSON</string>
+    <string name="msg_debug_json_empty">暂无调试数据，请先解析一次链接</string>
+    <string name="msg_debug_json_copied">已复制到剪贴板</string>
     <string name="label_caption">文案</string>
     <string name="label_media_list">可下载资源</string>
     <string name="label_preview">媒体预览</string>

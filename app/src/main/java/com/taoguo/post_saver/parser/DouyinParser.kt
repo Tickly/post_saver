@@ -1,5 +1,7 @@
 package com.taoguo.post_saver.parser
 
+import com.taoguo.post_saver.debug.ParseDebugJson
+import com.taoguo.post_saver.debug.ParseDebugStore
 import com.taoguo.post_saver.model.MediaItem
 import com.taoguo.post_saver.model.MediaType
 import com.taoguo.post_saver.model.ParseResult
@@ -26,16 +28,24 @@ class DouyinParser(
      * @throws ParseException 解析失败时抛出。
      */
     override fun parse(url: String): ParseResult {
-        val normalizedUrl = UrlNormalizer.normalize(url)
-        val resolvedUrl = resolveFinalUrl(normalizedUrl)
-        val itemId = extractItemId(resolvedUrl)
-            ?: throw ParseException("无法从链接中提取作品 ID")
+        val debug = JSONObject()
+        try {
+            val normalizedUrl = UrlNormalizer.normalize(url)
+            val resolvedUrl = resolveFinalUrl(normalizedUrl)
+            val itemId = extractItemId(resolvedUrl)
+                ?: throw ParseException("无法从链接中提取作品 ID")
+            debug.put("inputUrl", normalizedUrl)
 
-        fetchItemInfo(itemId)?.let { return it }
+            fetchItemInfo(itemId, normalizedUrl, resolvedUrl)?.let { return it }
 
-        val sharePageUrl = "https://www.iesdouyin.com/share/video/$itemId"
-        val html = fetchHtml(sharePageUrl)
-        return parseEmbeddedJson(html, itemId)
+            val sharePageUrl = "https://www.iesdouyin.com/share/video/$itemId"
+            val html = fetchHtml(sharePageUrl)
+            return parseEmbeddedJson(html, itemId, normalizedUrl, resolvedUrl)
+        } catch (error: Exception) {
+            debug.put("error", error.message ?: error.javaClass.simpleName)
+            ParseDebugStore.set(debug.toString(2))
+            throw error
+        }
     }
 
     /**
@@ -88,7 +98,7 @@ class DouyinParser(
      * @param itemId 输入：作品 ID。
      * @return 输出：解析结果；接口不可用时返回 null。
      */
-    private fun fetchItemInfo(itemId: String): ParseResult? {
+    private fun fetchItemInfo(itemId: String, inputUrl: String, resolvedUrl: String): ParseResult? {
         val apiUrl = "https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/?item_ids=$itemId"
         val request = Request.Builder()
             .url(apiUrl)
@@ -101,7 +111,7 @@ class DouyinParser(
                 if (!response.isSuccessful) return null
                 val body = response.body?.string().orEmpty()
                 if (body.isBlank()) return null
-                parseItemInfoJson(body)
+                parseItemInfoJson(body, inputUrl, resolvedUrl)
             }
         }.getOrNull()
     }
@@ -133,14 +143,15 @@ class DouyinParser(
      * @param json 输入：接口返回 JSON 字符串。
      * @return 输出：解析结果。
      */
-    private fun parseItemInfoJson(json: String): ParseResult {
+    private fun parseItemInfoJson(json: String, inputUrl: String, resolvedUrl: String): ParseResult {
         val root = JSONObject(json)
         val itemList = root.optJSONArray("item_list")
             ?: throw ParseException("接口未返回作品数据")
         if (itemList.length() == 0) {
             throw ParseException("作品不存在或已被删除")
         }
-        return mapAwemeItem(itemList.getJSONObject(0))
+        val aweme = itemList.getJSONObject(0)
+        return mapAwemeItem(aweme, "iteminfo", resolvedUrl, inputUrl)
     }
 
     /**
@@ -148,9 +159,16 @@ class DouyinParser(
      *
      * @param html 输入：分享页 HTML。
      * @param itemId 输入：作品 ID，用于兜底校验。
+     * @param inputUrl 输入：用户输入的归一化链接。
+     * @param resolvedUrl 输入：重定向后的最终链接。
      * @return 输出：解析结果。
      */
-    private fun parseEmbeddedJson(html: String, itemId: String): ParseResult {
+    private fun parseEmbeddedJson(
+        html: String,
+        itemId: String,
+        inputUrl: String,
+        resolvedUrl: String,
+    ): ParseResult {
         val jsonCandidates = listOf(
             extractScriptJson(html, "RENDER_DATA"),
             extractRouterData(html),
@@ -161,7 +179,9 @@ class DouyinParser(
             runCatching {
                 val decoded = URLDecoder.decode(candidate, Charsets.UTF_8.name())
                 val json = if (decoded.startsWith("{")) decoded else candidate
-                findAwemeInJson(JSONObject(json), itemId)?.let { return mapAwemeItem(it) }
+                findAwemeInJson(JSONObject(json), itemId)?.let {
+                    return mapAwemeItem(it, "embeddedHtml", resolvedUrl, inputUrl)
+                }
             }
         }
 
@@ -245,24 +265,38 @@ class DouyinParser(
     }
 
     /**
-     * 将 aweme JSON 映射为 ParseResult。
+     * 将 aweme JSON 映射为 ParseResult，并写入调试 JSON 缓存。
      *
      * @param item 输入：aweme JSON 对象。
+     * @param parseSource 输入：解析来源标识。
+     * @param resolvedUrl 输入：重定向后的最终链接。
+     * @param inputUrl 输入：用户输入的归一化链接。
      * @return 输出：解析结果。
      */
-    private fun mapAwemeItem(item: JSONObject): ParseResult {
+    private fun mapAwemeItem(
+        item: JSONObject,
+        parseSource: String,
+        resolvedUrl: String,
+        inputUrl: String,
+    ): ParseResult {
         val caption = item.optString("desc").ifBlank { item.optString("title") }
         val author = item.optJSONObject("author")?.optString("nickname")?.ifBlank { null }
         val mediaItems = buildMediaItems(item)
         if (mediaItems.isEmpty()) {
             throw ParseException("未找到可下载的图片或视频")
         }
-        return ParseResult(
+        val result = ParseResult(
             platform = Platform.DOUYIN,
             caption = caption,
             author = author,
             mediaItems = mediaItems,
         )
+        val itemId = item.optString("aweme_id", item.optString("awemeId"))
+        val debug = JSONObject().put("inputUrl", inputUrl)
+        ParseDebugJson.putDouyinFields(debug, itemId, resolvedUrl, item, parseSource)
+        ParseDebugJson.putParseResult(debug, result)
+        ParseDebugStore.set(debug.toString(2))
+        return result
     }
 
     /**
