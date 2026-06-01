@@ -1,6 +1,9 @@
 package com.taoguo.post_saver.parser
 
+import com.taoguo.post_saver.model.MediaItem
 import com.taoguo.post_saver.model.MediaType
+import com.taoguo.post_saver.model.ParseResult
+import com.taoguo.post_saver.model.Platform
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -59,6 +62,82 @@ class XiaohongshuParserTest {
         assertEquals(MediaType.IMAGE, result.mediaItems[0].type)
         assertTrue(result.mediaItems[0].url.contains("nc_n_webp_mw_1"))
         assertTrue(result.caption.contains("Ranch day"))
+    }
+
+    /**
+     * 7 张图笔记去重后应仍为 7 条高清图。
+     */
+    @Test
+    fun mapNoteFromState_carousel7_returnsSevenImages() {
+        val state = loadFixture("xhs_carousel_7.json")
+        val result = parser.mapNoteFromStateForTest(state, "69fdc0a60000000035023ceb")
+        assertEquals(7, result.mediaItems.size)
+        assertTrue(result.mediaItems.all { it.type == MediaType.IMAGE })
+        assertTrue(result.mediaItems.all { it.url.contains("webp_mw") })
+    }
+
+    /**
+     * 9 张图笔记应输出 9 条（含仅预览 URL 的图片位）。
+     */
+    @Test
+    fun mapNoteFromState_carousel9_returnsNineImages() {
+        val state = loadFixture("xhs_carousel_9.json")
+        val result = parser.mapNoteFromStateForTest(state, "69fdc0a60000000035023ceb")
+        assertEquals(9, result.mediaItems.size)
+    }
+
+    /**
+     * 完全重复的 URL 应合并为一条。
+     */
+    @Test
+    fun finalizeMediaItems_duplicateUrl_removed() {
+        val noteId = "69fdc0a60000000035023ceb"
+        val url = "https://sns-webpic-qc.xhscdn.com/202501180028/a001/spectrum/img001!nc_n_webp_mw_1"
+        val items = listOf(
+            MediaItem(type = MediaType.IMAGE, url = url, fileName = "xhs_${noteId}_1.jpg"),
+            MediaItem(type = MediaType.IMAGE, url = url, fileName = "xhs_${noteId}_2.jpg"),
+        )
+        assertEquals(1, parser.finalizeMediaItemsForTest(items, noteId).size)
+    }
+
+    /**
+     * HTML 图多于 INITIAL_STATE 时应采用 HTML 列表。
+     */
+    @Test
+    fun mergeParseResults_htmlHasMoreImages_usesHtmlList() {
+        val noteId = "69fdc0a60000000035023ceb"
+        val state = parser.mapNoteFromStateForTest(loadFixture("xhs_carousel_7.json"), noteId)
+        val htmlItems = (1..9).map { index ->
+            MediaItem(
+                type = MediaType.IMAGE,
+                url = "https://sns-webpic-qc.xhscdn.com/202501180028/a$index/spectrum/img$index!nc_n_webp_mw_1",
+                fileName = "tmp.jpg",
+            )
+        }
+        val htmlResult = ParseResult(
+            platform = Platform.XIAOHONGSHU,
+            caption = "",
+            mediaItems = htmlItems,
+        )
+        val merged = parser.mergeParseResultsForTest(state, htmlResult)
+        assertEquals(9, merged.mediaItems.size)
+        assertEquals("Ranch day", merged.caption)
+    }
+
+    /**
+     * HTML 兜底仅匹配 urlDefault，同图 urlPre 不应额外计入。
+     */
+    @Test
+    fun parseImagesFromHtml_onlyUrlDefault_excludesUrlPre() {
+        val noteId = "69fdc0a60000000035023ceb"
+        val html = """
+            noteId":"$noteId",
+            "urlPre":"https://sns-webpic-qc.xhscdn.com/202501180028/e8da355f0f66b93801735d44d2403f93/spectrum/1040g0k031coeec8616005osp8qg9tcbj7tkmhh8!nc_n_webp_prv_1",
+            "urlDefault":"https://sns-webpic-qc.xhscdn.com/202501180028/9a9667b8e0ea82be10f388b8c279d9d4/spectrum/1040g0k031coeec8616005osp8qg9tcbj7tkmhh8!nc_n_webp_mw_1"
+        """.trimIndent()
+        val result = parser.parseImagesFromHtmlForTest(html, noteId)
+        assertEquals(1, result?.mediaItems?.size)
+        assertTrue(result!!.mediaItems[0].url.contains("webp_mw"))
     }
 
     /**

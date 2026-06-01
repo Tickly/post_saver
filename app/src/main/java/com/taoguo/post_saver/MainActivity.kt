@@ -27,6 +27,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var mediaAdapter: MediaResultAdapter
     private lateinit var mediaDownloader: MediaDownloader
+    private var currentMediaItems: List<MediaItem> = emptyList()
+    private var isBatchDownloading = false
 
     /**
      * Activity 创建回调，初始化界面与事件。
@@ -65,6 +67,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupClickListeners() {
         binding.buttonPaste.setOnClickListener { pasteFromClipboard() }
         binding.buttonParse.setOnClickListener { parseInputText() }
+        binding.buttonDownloadAll.setOnClickListener { downloadAllMediaItems() }
     }
 
     /**
@@ -123,6 +126,7 @@ class MainActivity : AppCompatActivity() {
      * @return 输出：无返回值。
      */
     private fun downloadMediaItem(item: MediaItem, position: Int) {
+        if (isBatchDownloading) return
         mediaAdapter.setDownloading(position, true)
 
         lifecycleScope.launch {
@@ -149,6 +153,43 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 顺序下载当前解析结果中的全部媒体。
+     *
+     * @return 输出：无返回值。
+     */
+    private fun downloadAllMediaItems() {
+        if (currentMediaItems.isEmpty()) {
+            Toast.makeText(this, R.string.msg_download_all_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (isBatchDownloading) return
+
+        setBatchDownloadState(true)
+        lifecycleScope.launch {
+            var successCount = 0
+            var failedCount = 0
+            for ((index, item) in currentMediaItems.withIndex()) {
+                mediaAdapter.setDownloading(index, true)
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { mediaDownloader.download(item) }
+                }
+                mediaAdapter.setDownloading(index, false)
+                if (result.isSuccess) {
+                    successCount++
+                } else {
+                    failedCount++
+                }
+            }
+            setBatchDownloadState(false)
+            Toast.makeText(
+                this@MainActivity,
+                getString(R.string.msg_download_all_summary, successCount, failedCount),
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
+    /**
      * 展示解析成功的结果。
      *
      * @param result 输入：解析结果。
@@ -165,10 +206,13 @@ class MainActivity : AppCompatActivity() {
             binding.textAuthor.visibility = View.GONE
         }
 
-        mediaAdapter.submitList(result.mediaItems)
+        currentMediaItems = result.mediaItems
+        mediaAdapter.submitList(currentMediaItems)
+        binding.buttonDownloadAll.visibility =
+            if (currentMediaItems.isNotEmpty()) View.VISIBLE else View.GONE
         Toast.makeText(
             this,
-            getString(R.string.msg_parse_success, result.mediaItems.size),
+            getString(R.string.msg_parse_success, currentMediaItems.size),
             Toast.LENGTH_SHORT,
         ).show()
     }
@@ -201,6 +245,8 @@ class MainActivity : AppCompatActivity() {
      */
     private fun hideResult() {
         binding.layoutResult.visibility = View.GONE
+        binding.buttonDownloadAll.visibility = View.GONE
+        currentMediaItems = emptyList()
         mediaAdapter.submitList(emptyList())
     }
 
@@ -212,8 +258,24 @@ class MainActivity : AppCompatActivity() {
      */
     private fun setParsingState(parsing: Boolean) {
         binding.progressParsing.visibility = if (parsing) View.VISIBLE else View.GONE
-        binding.buttonParse.isEnabled = !parsing
-        binding.buttonPaste.isEnabled = !parsing
+        binding.buttonParse.isEnabled = !parsing && !isBatchDownloading
+        binding.buttonPaste.isEnabled = !parsing && !isBatchDownloading
+    }
+
+    /**
+     * 切换批量下载中的 UI 状态。
+     *
+     * @param downloading 输入：是否正在批量下载。
+     * @return 输出：无返回值。
+     */
+    private fun setBatchDownloadState(downloading: Boolean) {
+        isBatchDownloading = downloading
+        binding.buttonDownloadAll.isEnabled = !downloading
+        binding.buttonDownloadAll.text = getString(
+            if (downloading) R.string.btn_download_all_running else R.string.btn_download_all,
+        )
+        binding.buttonParse.isEnabled = !downloading
+        binding.buttonPaste.isEnabled = !downloading
     }
 
     /**

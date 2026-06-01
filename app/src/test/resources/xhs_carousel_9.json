@@ -1,0 +1,30 @@
+{
+  "note": {
+    "noteDetailMap": {
+      "69fdc0a60000000035023ceb": {
+        "note": {
+          "noteId": "69fdc0a60000000035023ceb",
+          "title": "Ranch day",
+          "desc": "Ranch day",
+          "imageList": [
+            {"urlDefault": "https://sns-webpic-qc.xhscdn.com/202501180028/a001/spectrum/img001!nc_n_webp_mw_1"},
+            {"urlDefault": "https://sns-webpic-qc.xhscdn.com/202501180028/a002/spectrum/img002!nc_n_webp_mw_1"},
+            {"urlDefault": "https://sns-webpic-qc.xhscdn.com/202501180028/a003/spectrum/img003!nc_n_webp_mw_1"},
+            {"urlDefault": "https://sns-webpic-qc.xhscdn.com/202501180028/a004/spectrum/img004!nc_n_webp_mw_1"},
+            {"urlDefault": "https://sns-webpic-qc.xhscdn.com/202501180028/a005/spectrum/img005!nc_n_webp_mw_1"},
+            {"urlDefault": "https://sns-webpic-qc.xhscdn.com/202501180028/a006/spectrum/img006!nc_n_webp_mw_1"},
+            {"urlDefault": "https://sns-webpic-qc.xhscdn.com/202501180028/a007/spectrum/img007!nc_n_webp_mw_1"},
+            {
+              "urlPre": "https://sns-webpic-qc.xhscdn.com/202501180028/a008/spectrum/img008!nc_n_webp_prv_1",
+              "infoList": [{"imageScene": "WB_PRV", "url": "https://sns-webpic-qc.xhscdn.com/202501180028/a008/spectrum/img008!nc_n_webp_prv_1"}]
+            },
+            {
+              "urlPre": "https://sns-webpic-qc.xhscdn.com/202501180028/a009/spectrum/img009!nc_n_webp_prv_1",
+              "url_pre": "https://sns-webpic-qc.xhscdn.com/202501180028/a009/spectrum/img009!nc_n_webp_prv_1"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

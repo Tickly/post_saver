@@ -25,6 +25,38 @@ class MediaDownloader(
 ) {
 
     /**
+     * 批量下载结果统计。
+     *
+     * @param successCount 输入：成功数量。
+     * @param failedCount 输入：失败数量。
+     * @return 输出：统计结果对象。
+     */
+    data class BatchDownloadResult(
+        val successCount: Int,
+        val failedCount: Int,
+    )
+
+    /**
+     * 顺序下载多条媒体到相册。
+     *
+     * @param items 输入：媒体列表。
+     * @return 输出：成功与失败计数。
+     */
+    fun downloadAll(items: List<MediaItem>): BatchDownloadResult {
+        var successCount = 0
+        var failedCount = 0
+        for (item in items) {
+            try {
+                download(item)
+                successCount++
+            } catch (_: Exception) {
+                failedCount++
+            }
+        }
+        return BatchDownloadResult(successCount, failedCount)
+    }
+
+    /**
      * 下载单个媒体文件到相册。
      *
      * @param item 输入：待下载的媒体资源。

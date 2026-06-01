@@ -31,14 +31,49 @@ class XiaohongshuParser(
             ?: throw ParseException("无法从链接中提取笔记 ID")
 
         val htmlMobile = fetchHtml(pageUrl, MOBILE_USER_AGENT)
-        parseInitialState(htmlMobile, noteId)?.let { return it }
-        parseImagesFromHtml(htmlMobile, noteId)?.let { return it }
+        tryParseNoteFromHtml(htmlMobile, noteId)?.let { return it }
         runCatching { return parseOpenGraph(htmlMobile, noteId) }
 
         val htmlDesktop = fetchHtml(pageUrl, DESKTOP_USER_AGENT)
-        parseInitialState(htmlDesktop, noteId)?.let { return it }
-        parseImagesFromHtml(htmlDesktop, noteId)?.let { return it }
+        tryParseNoteFromHtml(htmlDesktop, noteId)?.let { return it }
         return parseOpenGraph(htmlDesktop, noteId)
+    }
+
+    /**
+     * 从 HTML 解析笔记，并在 INITIAL_STATE 图不全时用页面内嵌 URL 补全。
+     *
+     * @param html 输入：页面 HTML。
+     * @param noteId 输入：笔记 ID。
+     * @return 输出：解析结果；无法解析时返回 null。
+     */
+    private fun tryParseNoteFromHtml(html: String, noteId: String): ParseResult? {
+        val stateResult = parseInitialState(html, noteId)
+        val htmlImageResult = parseImagesFromHtml(html, noteId)
+        if (stateResult != null && htmlImageResult != null) {
+            return mergeParseResults(stateResult, htmlImageResult)
+        }
+        return stateResult ?: htmlImageResult
+    }
+
+    /**
+     * 合并 INITIAL_STATE 与 HTML 兜底结果，保留更完整的媒体列表与文案。
+     *
+     * @param stateResult 输入：INITIAL_STATE 解析结果。
+     * @param htmlResult 输入：HTML 内嵌 URL 解析结果。
+     * @return 输出：合并后的解析结果。
+     */
+    private fun mergeParseResults(stateResult: ParseResult, htmlResult: ParseResult): ParseResult {
+        val mediaItems = if (htmlResult.mediaItems.size > stateResult.mediaItems.size) {
+            htmlResult.mediaItems
+        } else {
+            stateResult.mediaItems
+        }
+        return ParseResult(
+            platform = stateResult.platform,
+            caption = stateResult.caption.ifBlank { htmlResult.caption },
+            author = stateResult.author ?: htmlResult.author,
+            mediaItems = mediaItems,
+        )
     }
 
     /**
@@ -341,7 +376,7 @@ class XiaohongshuParser(
         val anchor = html.indexOf(noteId)
         if (anchor < 0) return null
         val segmentStart = (anchor - 500).coerceAtLeast(0)
-        val segmentEnd = (anchor + 80_000).coerceAtMost(html.length)
+        val segmentEnd = (anchor + 200_000).coerceAtMost(html.length)
         val segment = html.substring(segmentStart, segmentEnd)
 
         val imageUrls = IMAGE_URL_PATTERN.findAll(segment)
@@ -355,12 +390,12 @@ class XiaohongshuParser(
             ?: extractMetaContent(html, "description")
             ?: ""
         val author = extractMetaContent(html, "og:site_name")
-        val mediaItems = imageUrls.mapIndexed { index, imageUrl ->
+        val rawItems = imageUrls.map { imageUrl ->
             MediaItem(
                 type = MediaType.IMAGE,
                 url = imageUrl,
                 previewUrl = imageUrl,
-                fileName = "xhs_${noteId}_${index + 1}.jpg",
+                fileName = "xhs_${noteId}_tmp.jpg",
                 referer = XHS_REFERER,
             )
         }
@@ -368,7 +403,7 @@ class XiaohongshuParser(
             platform = Platform.XIAOHONGSHU,
             caption = caption,
             author = author,
-            mediaItems = mediaItems,
+            mediaItems = finalizeMediaItems(rawItems, noteId),
         )
     }
 
@@ -412,7 +447,7 @@ class XiaohongshuParser(
             platform = Platform.XIAOHONGSHU,
             caption = caption,
             author = author,
-            mediaItems = mediaItems,
+            mediaItems = finalizeMediaItems(mediaItems, noteId),
         )
     }
 
@@ -477,8 +512,47 @@ class XiaohongshuParser(
             platform = Platform.XIAOHONGSHU,
             caption = caption,
             author = author,
-            mediaItems = mediaItems,
+            mediaItems = finalizeMediaItems(mediaItems, noteId),
         )
+    }
+
+    /**
+     * 去重并规范化媒体列表（合并同图预览/高清，重新编号文件名）。
+     *
+     * @param items 输入：原始媒体列表。
+     * @param noteId 输入：笔记 ID。
+     * @return 输出：去重后的可下载列表。
+     */
+    private fun finalizeMediaItems(items: List<MediaItem>, noteId: String): List<MediaItem> {
+        if (items.isEmpty()) return emptyList()
+        val videos = items.filter { it.type == MediaType.VIDEO }
+        val dedupedImages = dedupeImageItems(items.filter { it.type == MediaType.IMAGE })
+        val images = dedupedImages.mapIndexed { index, item ->
+            item.copy(fileName = "xhs_${noteId}_${index + 1}.jpg")
+        }
+        return images + videos
+    }
+
+    /**
+     * 去除完全重复的图片 URL，保留每张图一条（不按 spectrum 合并，避免误删不同图片）。
+     *
+     * @param images 输入：图片媒体列表。
+     * @return 输出：去重后的图片列表（保持首次出现顺序）。
+     */
+    private fun dedupeImageItems(images: List<MediaItem>): List<MediaItem> {
+        val seenUrls = mutableSetOf<String>()
+        return images.filter { seenUrls.add(it.url) }
+    }
+
+    /**
+     * 判断 URL 是否为小红书预览图（通常不适合下载）。
+     *
+     * @param url 输入：图片 URL。
+     * @return 输出：true 表示预览图。
+     */
+    private fun isPreviewImageUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains("webp_prv") || lower.contains("!nc_n_webp_prv")
     }
 
     /**
@@ -566,17 +640,18 @@ class XiaohongshuParser(
             imageObj.optString("urlDefault"),
             imageObj.optString("url_default"),
             imageObj.optString("url"),
-            imageObj.optString("urlPre"),
-            imageObj.optString("url_pre"),
             imageObj.optString("original"),
             imageObj.optString("livePhoto"),
+            imageObj.optString("urlPre"),
+            imageObj.optString("url_pre"),
         ).filter { it.isNotBlank() }
 
-        return candidates.firstOrNull()
+        return candidates.firstOrNull { !isPreviewImageUrl(it) }
+            ?: candidates.firstOrNull()
     }
 
     /**
-     * 从 infoList 中优先选取 WB_DFT 场景的高清图。
+     * 从 infoList 中选取图片 URL（优先 WB_DFT 高清，否则取任意可用地址）。
      *
      * @param infoList 输入：infoList / info_list 数组。
      * @return 输出：图片 URL；未找到时返回 null。
@@ -658,10 +733,43 @@ class XiaohongshuParser(
         return mapNoteObject(note, noteId)
     }
 
+    /**
+     * 供单元测试调用：去重并规范化媒体列表。
+     *
+     * @param items 输入：原始媒体列表。
+     * @param noteId 输入：笔记 ID。
+     * @return 输出：去重后的列表。
+     */
+    internal fun finalizeMediaItemsForTest(items: List<MediaItem>, noteId: String): List<MediaItem> {
+        return finalizeMediaItems(items, noteId)
+    }
+
+    /**
+     * 供单元测试调用：从 HTML 片段解析图片。
+     *
+     * @param html 输入：页面 HTML。
+     * @param noteId 输入：笔记 ID。
+     * @return 输出：解析结果；无图片时返回 null。
+     */
+    internal fun parseImagesFromHtmlForTest(html: String, noteId: String): ParseResult? {
+        return parseImagesFromHtml(html, noteId)
+    }
+
+    /**
+     * 供单元测试调用：合并 INITIAL_STATE 与 HTML 解析结果。
+     *
+     * @param stateResult 输入：INITIAL_STATE 解析结果。
+     * @param htmlResult 输入：HTML 解析结果。
+     * @return 输出：合并后的解析结果。
+     */
+    internal fun mergeParseResultsForTest(stateResult: ParseResult, htmlResult: ParseResult): ParseResult {
+        return mergeParseResults(stateResult, htmlResult)
+    }
+
     companion object {
         private const val XHS_REFERER = "https://www.xiaohongshu.com/"
         private val IMAGE_URL_PATTERN = Regex(
-            """"(?:urlDefault|url_default|urlPre|url_pre)"\s*:\s*"(https?://[^"]+)"""",
+            """"(?:urlDefault|url_default)"\s*:\s*"(https?://[^"]+)"""",
             RegexOption.IGNORE_CASE,
         )
         private const val MOBILE_USER_AGENT =
