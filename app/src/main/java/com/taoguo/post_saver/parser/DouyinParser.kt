@@ -804,8 +804,8 @@ class DouyinParser(
      * @return 输出：内容类型枚举。
      */
     internal fun classifyContentTypeForTest(item: JSONObject): DouyinContentType {
-        val playUrl = extractVideoPlayUrl(item.optJSONObject("video"))
-        return classifyContentType(item, playUrl)
+        val videoVariants = extractVideoVariants(item.optJSONObject("video"))
+        return classifyContentType(item, videoVariants)
     }
 
     /**
