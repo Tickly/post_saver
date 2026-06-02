@@ -57,6 +57,7 @@ object ParseDebugJson {
             put("previewUrl", item.previewUrl ?: JSONObject.NULL)
             put("fileName", item.fileName ?: JSONObject.NULL)
             put("referer", item.referer ?: JSONObject.NULL)
+            put("label", item.label ?: JSONObject.NULL)
         }
     }
 

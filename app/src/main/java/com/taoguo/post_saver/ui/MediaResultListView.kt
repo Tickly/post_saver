@@ -81,7 +81,13 @@ class MediaResultListView(
         val context = binding.root.context
         val typeLabel = when (item.type) {
             MediaType.IMAGE -> context.getString(R.string.label_media_image)
-            MediaType.VIDEO -> context.getString(R.string.label_media_video)
+            MediaType.VIDEO -> {
+                if (!item.label.isNullOrBlank()) {
+                    context.getString(R.string.label_media_video_variant, item.label)
+                } else {
+                    context.getString(R.string.label_media_video)
+                }
+            }
         }
         binding.textMediaType.text = typeLabel
         binding.textMediaIndex.text = context.getString(R.string.label_media_index, position + 1)

@@ -310,8 +310,8 @@ class DouyinParser(
         val items = mutableListOf<MediaItem>()
 
         val video = item.optJSONObject("video")
-        val playUrl = extractVideoPlayUrl(video)
-        val contentType = classifyContentType(item, playUrl)
+        val videoVariants = extractVideoVariants(video)
+        val contentType = classifyContentType(item, videoVariants)
 
         val images = item.optJSONArray("images")
         val hasImages = images != null && images.length() > 0
@@ -332,19 +332,22 @@ class DouyinParser(
             extractFromImageInfos(item, awemeId).let { items.addAll(it) }
         }
 
-        if (contentType == DouyinContentType.VIDEO && playUrl != null) {
+        if (contentType == DouyinContentType.VIDEO && videoVariants.isNotEmpty()) {
             val coverUrl = pickBestImageUrl(video?.optJSONObject("cover")?.optJSONArray("url_list"))
                 ?: pickBestImageUrl(video?.optJSONObject("origin_cover")?.optJSONArray("url_list"))
                 ?: pickBestImageUrl(video?.optJSONObject("dynamic_cover")?.optJSONArray("url_list"))
-            items.add(
-                MediaItem(
-                    type = MediaType.VIDEO,
-                    url = playUrl,
-                    previewUrl = coverUrl,
-                    fileName = "douyin_${awemeId}.mp4",
-                    referer = DOUYIN_REFERER,
-                ),
-            )
+            for (variant in videoVariants) {
+                items.add(
+                    MediaItem(
+                        type = MediaType.VIDEO,
+                        url = variant.url,
+                        previewUrl = coverUrl,
+                        fileName = "douyin_${awemeId}_${variant.fileSuffix}.mp4",
+                        referer = DOUYIN_REFERER,
+                        label = variant.label,
+                    ),
+                )
+            }
         }
 
         return items
@@ -354,63 +357,246 @@ class DouyinParser(
      * 判断作品应作为图片还是视频处理。
      *
      * @param item 输入：aweme JSON 对象。
-     * @param playUrl 输入：已提取的视频播放地址，可为空。
+     * @param videoVariants 输入：已提取的视频变体列表。
      * @return 输出：内容类型枚举。
      */
-    private fun classifyContentType(item: JSONObject, playUrl: String?): DouyinContentType {
+    private fun classifyContentType(item: JSONObject, videoVariants: List<VideoVariant>): DouyinContentType {
         val awemeType = item.optInt("aweme_type", item.optInt("awemeType", -1))
         val duration = item.optJSONObject("video")?.optInt("duration", 0) ?: 0
         val hasImages = (item.optJSONArray("images")?.length() ?: 0) > 0
+        val hasVideoVariants = videoVariants.isNotEmpty()
 
         if (awemeType in IMAGE_AWEME_TYPES) {
             return DouyinContentType.IMAGE
         }
-        if (awemeType in VIDEO_AWEME_TYPES && duration > 0 && playUrl != null) {
+        if (awemeType in VIDEO_AWEME_TYPES && duration > 0 && hasVideoVariants) {
             return DouyinContentType.VIDEO
         }
-        if (hasImages && (playUrl == null || duration == 0)) {
+        if (hasImages && (!hasVideoVariants || duration == 0)) {
             return DouyinContentType.IMAGE
         }
-        if (playUrl != null && duration > 0) {
+        if (hasVideoVariants && duration > 0) {
             return DouyinContentType.VIDEO
         }
         if (hasImages) {
             return DouyinContentType.IMAGE
         }
-        if (playUrl != null) {
+        if (hasVideoVariants) {
             return DouyinContentType.VIDEO
         }
         return DouyinContentType.IMAGE
     }
 
     /**
-     * 从 video 对象中提取可播放的视频 URL。
+     * 从 video 对象中提取全部可下载的视频变体。
      *
      * @param video 输入：video JSON 对象。
-     * @return 输出：视频 URL；未找到时返回 null。
+     * @return 输出：按优先级排序的去重变体列表。
      */
-    private fun extractVideoPlayUrl(video: JSONObject?): String? {
+    private fun extractVideoVariants(video: JSONObject?): List<VideoVariant> {
         if (video == null) {
-            return null
+            return emptyList()
         }
 
-        val candidates = listOfNotNull(
-            pickBestVideoUrl(video.optJSONObject("play_addr")?.optJSONArray("url_list")),
-            pickBestVideoUrl(video.optJSONObject("play_addr_lowbr")?.optJSONArray("url_list")),
-            pickBestVideoUrl(video.optJSONObject("play_addr_h264")?.optJSONArray("url_list")),
-            pickBestVideoUrl(video.optJSONObject("play_addr_265")?.optJSONArray("url_list")),
-            pickBestVideoUrl(video.optJSONObject("download_addr")?.optJSONArray("url_list")),
-            pickBestVideoUrlFromBitRate(video.optJSONArray("bit_rate")),
-        )
+        val variantMap = linkedMapOf<String, VideoVariant>()
 
-        candidates.firstOrNull { !isImageUrl(it) }?.let { return it }
+        collectVariantsFromUrlList(
+            variantMap,
+            video.optJSONObject("play_addr")?.optJSONArray("url_list"),
+        )
+        collectVariantsFromUrlList(
+            variantMap,
+            video.optJSONObject("play_addr_lowbr")?.optJSONArray("url_list"),
+            LABEL_LOWBR,
+            SORT_LOWBR,
+        )
+        collectVariantsFromUrlList(
+            variantMap,
+            video.optJSONObject("play_addr_h264")?.optJSONArray("url_list"),
+            LABEL_H264,
+            SORT_H264,
+        )
+        collectVariantsFromUrlList(
+            variantMap,
+            video.optJSONObject("play_addr_265")?.optJSONArray("url_list"),
+            LABEL_H265,
+            SORT_H265,
+        )
+        collectVariantsFromUrlList(
+            variantMap,
+            video.optJSONObject("download_addr")?.optJSONArray("url_list"),
+            LABEL_DOWNLOAD,
+            SORT_DOWNLOAD,
+        )
+        collectVariantsFromBitRate(variantMap, video.optJSONArray("bit_rate"))
 
         val playAddr = video.optJSONObject("play_addr")
+        val urlList = playAddr?.optJSONArray("url_list")
+        val hasUrlList = urlList != null && urlList.length() > 0
         val uri = playAddr?.optString("uri")?.takeIf { it.isNotBlank() }
-        if (uri != null) {
-            return normalizeVideoPlayUrl(buildPlayUrlFromVideoId(uri))
+        if (uri != null && !hasUrlList) {
+            registerVariant(
+                variantMap,
+                buildPlayUrlFromVideoId(uri),
+                LABEL_API_NOWM,
+                SORT_API_NOWM,
+            )
+            registerVariant(
+                variantMap,
+                buildPlaywmUrlFromVideoId(uri),
+                LABEL_API_WM,
+                SORT_API_WM,
+            )
         }
-        return null
+
+        return variantMap.values.sortedBy { it.sortOrder }
+    }
+
+    /**
+     * 从 url_list 收集视频变体并写入映射表。
+     *
+     * @param variantMap 输入/输出：规范化 URL 到变体的映射。
+     * @param urlList 输入：URL 数组。
+     * @param defaultLabel 输入：无法自动分类时的默认标签，可为空。
+     * @param defaultSortOrder 输入：默认排序权重。
+     * @return 输出：无返回值。
+     */
+    private fun collectVariantsFromUrlList(
+        variantMap: LinkedHashMap<String, VideoVariant>,
+        urlList: JSONArray?,
+        defaultLabel: String? = null,
+        defaultSortOrder: Int = SORT_OTHER,
+    ) {
+        for (url in collectUrls(urlList)) {
+            if (url.contains("playwm", ignoreCase = true)) {
+                registerVariant(variantMap, url, LABEL_API_WM, SORT_API_WM)
+                registerVariant(
+                    variantMap,
+                    normalizeVideoPlayUrl(url),
+                    LABEL_API_NOWM,
+                    SORT_API_NOWM,
+                )
+                continue
+            }
+
+            val classified = classifyVideoUrl(url)
+            if (classified != null) {
+                registerVariant(variantMap, url, classified.first, classified.second)
+            } else if (defaultLabel != null) {
+                registerVariant(variantMap, url, defaultLabel, defaultSortOrder)
+            }
+        }
+    }
+
+    /**
+     * 从 bit_rate 数组收集视频变体。
+     *
+     * @param variantMap 输入/输出：规范化 URL 到变体的映射。
+     * @param bitRateList 输入：bit_rate JSON 数组。
+     * @return 输出：无返回值。
+     */
+    private fun collectVariantsFromBitRate(
+        variantMap: LinkedHashMap<String, VideoVariant>,
+        bitRateList: JSONArray?,
+    ) {
+        if (bitRateList == null || bitRateList.length() == 0) {
+            return
+        }
+        for (index in 0 until bitRateList.length()) {
+            val bitRate = bitRateList.optJSONObject(index) ?: continue
+            val gearName = bitRate.optString("gear_name").ifBlank {
+                val bitRateValue = bitRate.optInt("bit_rate", 0)
+                if (bitRateValue > 0) "${bitRateValue}bps" else "码率"
+            }
+            collectVariantsFromUrlList(
+                variantMap,
+                bitRate.optJSONObject("play_addr")?.optJSONArray("url_list"),
+                gearName,
+                SORT_BITRATE,
+            )
+        }
+    }
+
+    /**
+     * 注册单个视频变体，相同 URL 保留排序权重更高者。
+     *
+     * @param variantMap 输入/输出：规范化 URL 到变体的映射。
+     * @param url 输入：原始视频 URL。
+     * @param label 输入：变体标签。
+     * @param sortOrder 输入：排序权重（越小越靠前）。
+     * @return 输出：无返回值。
+     */
+    private fun registerVariant(
+        variantMap: LinkedHashMap<String, VideoVariant>,
+        url: String,
+        label: String,
+        sortOrder: Int,
+    ) {
+        if (isImageUrl(url)) {
+            return
+        }
+        val normalized = UrlNormalizer.normalize(url)
+        val existing = variantMap[normalized]
+        if (existing == null || sortOrder < existing.sortOrder) {
+            variantMap[normalized] = VideoVariant(
+                url = normalized,
+                label = label,
+                sortOrder = sortOrder,
+                fileSuffix = fileSuffixForLabel(label),
+            )
+        }
+    }
+
+    /**
+     * 根据 URL 特征推断变体标签与排序权重。
+     *
+     * @param url 输入：候选视频 URL。
+     * @return 输出：标签与排序权重对；无法识别时返回 null。
+     */
+    private fun classifyVideoUrl(url: String): Pair<String, Int>? {
+        if (isImageUrl(url)) {
+            return null
+        }
+        val lower = url.lowercase()
+        return when {
+            lower.contains("playwm") -> LABEL_API_WM to SORT_API_WM
+            lower.contains("/play/") || lower.contains("/play?") -> LABEL_API_NOWM to SORT_API_NOWM
+            lower.contains("douyinvod") && lower.contains("watermark") -> LABEL_CDN_WM to SORT_CDN_WM
+            lower.contains("douyinvod") && lower.contains("/clean/") -> LABEL_CDN_CLEAN to SORT_CDN_CLEAN
+            lower.contains("douyinvod") -> LABEL_CDN_CLEAN to SORT_CDN_CLEAN
+            lower.contains("watermark") -> LABEL_CDN_WM to SORT_CDN_WM
+            else -> null
+        }
+    }
+
+    /**
+     * 根据变体标签生成文件名后缀。
+     *
+     * @param label 输入：变体标签。
+     * @return 输出：文件名后缀片段。
+     */
+    private fun fileSuffixForLabel(label: String): String {
+        return when (label) {
+            LABEL_CDN_CLEAN -> "cdn_clean"
+            LABEL_CDN_WM -> "cdn_wm"
+            LABEL_API_NOWM -> "api_nowm"
+            LABEL_API_WM -> "api_wm"
+            LABEL_LOWBR -> "lowbr"
+            LABEL_H264 -> "h264"
+            LABEL_H265 -> "h265"
+            LABEL_DOWNLOAD -> "download"
+            else -> label.replace(Regex("[^a-zA-Z0-9]+"), "_").trim('_').lowercase().ifBlank { "variant" }
+        }
+    }
+
+    /**
+     * 从 video 对象中提取首选视频 URL（兼容旧逻辑）。
+     *
+     * @param video 输入：video JSON 对象。
+     * @return 输出：优先级最高的视频 URL；未找到时返回 null。
+     */
+    private fun extractVideoPlayUrl(video: JSONObject?): String? {
+        return extractVideoVariants(video).firstOrNull()?.url
     }
 
     /**
@@ -424,41 +610,23 @@ class DouyinParser(
     }
 
     /**
-     * 判断 URL 是否明显为带水印的视频地址。
+     * 根据 video_id 构造带水印播放 API 地址。
      *
-     * @param url 输入：候选播放 URL。
-     * @return 输出：true 表示路径含 watermark 或 playwm。
+     * @param videoId 输入：play_addr.uri 或同类视频 ID。
+     * @return 输出：aweme playwm 接口 URL。
      */
-    private fun isWatermarkedVideoUrl(url: String): Boolean {
-        val lower = url.lowercase()
-        return lower.contains("watermark") || lower.contains("playwm")
+    private fun buildPlaywmUrlFromVideoId(videoId: String): String {
+        return "https://aweme.snssdk.com/aweme/v1/playwm/?video_id=$videoId&ratio=720p&line=0"
     }
 
     /**
-     * 将 playwm 播放地址规范为 play（无水印 API 路径）。
+     * 将 playwm 播放地址转换为 play（无水印 API 路径）。
      *
      * @param url 输入：原始视频 URL。
-     * @return 输出：规范化后的 URL。
+     * @return 输出：替换 playwm 后的 URL。
      */
     private fun normalizeVideoPlayUrl(url: String): String {
         return PLAYWM_PATTERN.replace(url, "play")
-    }
-
-    /**
-     * 从 bit_rate 列表中提取视频播放地址。
-     *
-     * @param bitRateList 输入：bit_rate JSON 数组。
-     * @return 输出：视频 URL；未找到时返回 null。
-     */
-    private fun pickBestVideoUrlFromBitRate(bitRateList: JSONArray?): String? {
-        if (bitRateList == null || bitRateList.length() == 0) {
-            return null
-        }
-        for (index in 0 until bitRateList.length()) {
-            val bitRate = bitRateList.optJSONObject(index) ?: continue
-            pickBestVideoUrl(bitRate.optJSONObject("play_addr")?.optJSONArray("url_list"))?.let { return it }
-        }
-        return null
     }
 
     /**
@@ -586,19 +754,6 @@ class DouyinParser(
     }
 
     /**
-     * 从 url_list 中选取视频 URL（优先无 watermark / playwm，并规范化 playwm→play）。
-     *
-     * @param urlList 输入：URL 数组。
-     * @return 输出：视频 URL；列表为空时返回 null。
-     */
-    private fun pickBestVideoUrl(urlList: JSONArray?): String? {
-        val normalized = collectUrls(urlList)
-        val best = normalized.firstOrNull { !isWatermarkedVideoUrl(it) }
-            ?: normalized.firstOrNull()
-        return best?.let { normalizeVideoPlayUrl(it) }
-    }
-
-    /**
      * 供单元测试调用：从 aweme JSON 构建媒体列表。
      *
      * @param item 输入：aweme JSON 对象。
@@ -607,6 +762,32 @@ class DouyinParser(
     internal fun buildMediaItemsForTest(item: JSONObject): List<MediaItem> {
         return buildMediaItems(item)
     }
+
+    /**
+     * 供单元测试调用：提取视频变体列表。
+     *
+     * @param video 输入：video JSON 对象。
+     * @return 输出：视频变体列表。
+     */
+    internal fun extractVideoVariantsForTest(video: JSONObject?): List<VideoVariant> {
+        return extractVideoVariants(video)
+    }
+
+    /**
+     * 抖音视频下载变体。
+     *
+     * @param url 输入：规范化后的下载 URL。
+     * @param label 输入：变体标签。
+     * @param sortOrder 输入：排序权重。
+     * @param fileSuffix 输入：文件名后缀。
+     * @return 输出：视频变体对象。
+     */
+    internal data class VideoVariant(
+        val url: String,
+        val label: String,
+        val sortOrder: Int,
+        val fileSuffix: String,
+    )
 
     /**
      * 抖音作品内容类型。
@@ -640,6 +821,24 @@ class DouyinParser(
 
     companion object {
         private const val DOUYIN_REFERER = "https://www.douyin.com/"
+        private const val LABEL_CDN_CLEAN = "CDN 无水印"
+        private const val LABEL_CDN_WM = "CDN 带水印"
+        private const val LABEL_API_NOWM = "API 无水印"
+        private const val LABEL_API_WM = "API 带水印"
+        private const val LABEL_LOWBR = "低码率 CDN"
+        private const val LABEL_H264 = "H264"
+        private const val LABEL_H265 = "H265"
+        private const val LABEL_DOWNLOAD = "下载地址"
+        private const val SORT_CDN_CLEAN = 10
+        private const val SORT_CDN_WM = 20
+        private const val SORT_API_NOWM = 30
+        private const val SORT_API_WM = 40
+        private const val SORT_LOWBR = 50
+        private const val SORT_H264 = 51
+        private const val SORT_H265 = 52
+        private const val SORT_DOWNLOAD = 60
+        private const val SORT_BITRATE = 70
+        private const val SORT_OTHER = 80
         private val PLAYWM_PATTERN = Regex("playwm", RegexOption.IGNORE_CASE)
         private val IMAGE_AWEME_TYPES = setOf(2, 68, 61)
         private val VIDEO_AWEME_TYPES = setOf(0, 4, 51, 107)

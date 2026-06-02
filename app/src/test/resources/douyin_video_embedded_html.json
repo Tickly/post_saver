@@ -1,0 +1,23 @@
+{
+  "aweme_id": "7646304946141763956",
+  "desc": "东风吹 战鼓擂 九儿狙击怕过谁#国服狙王 #上热搜",
+  "aweme_type": 4,
+  "author": {
+    "nickname": "_梦"
+  },
+  "video": {
+    "duration": 14200,
+    "play_addr": {
+      "uri": "v0200fg10000d8ei3ivog65ij7oev9p0",
+      "url_list": [
+        "https://aweme.snssdk.com/aweme/v1/playwm/?video_id=v0200fg10000d8ei3ivog65ij7oev9p0&ratio=720p&line=0"
+      ]
+    },
+    "cover": {
+      "url_list": [
+        "https://p11-sign.douyinpic.com/tos-cn-i-0813c001/cover.webp"
+      ]
+    },
+    "bit_rate": null
+  }
+}

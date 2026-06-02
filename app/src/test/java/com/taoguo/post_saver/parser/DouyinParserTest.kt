@@ -24,50 +24,70 @@ class DouyinParserTest {
     }
 
     /**
-     * 视频作品应识别为 VIDEO 且提取无 watermark 播放地址。
+     * 视频作品应识别为 VIDEO 且提取 clean/watermark 两条 CDN 变体。
      */
     @Test
-    fun buildMediaItems_videoPost_returnsVideoWithoutWatermark() {
+    fun buildMediaItems_videoPost_returnsCdnVariants() {
         val item = loadFixture("douyin_video.json")
 
         assertEquals(DouyinParser.DouyinContentType.VIDEO, parser.classifyContentTypeForTest(item))
 
         val mediaItems = parser.buildMediaItemsForTest(item)
-        assertEquals(1, mediaItems.size)
-        assertEquals(MediaType.VIDEO, mediaItems[0].type)
-        assertTrue(mediaItems[0].url.contains("clean/video.mp4"))
-        assertTrue(!mediaItems[0].url.contains("watermark", ignoreCase = true))
+        assertEquals(2, mediaItems.size)
+        assertTrue(mediaItems.all { it.type == MediaType.VIDEO })
+        assertTrue(mediaItems.any { it.url.contains("clean/video.mp4") })
+        assertTrue(mediaItems.any { it.url.contains("watermark/video.mp4") })
+        assertTrue(mediaItems.any { it.label == "CDN 无水印" })
+        assertTrue(mediaItems.any { it.label == "CDN 带水印" })
     }
 
     /**
-     * playwm API 地址应规范为 play 无水印播放链。
+     * playwm API 地址应同时产出 API 无水印与 API 带水印两条变体。
      */
     @Test
-    fun buildMediaItems_videoPost_playwmUrl_normalizedToPlay() {
+    fun buildMediaItems_videoPost_playwmUrl_returnsApiVariants() {
         val item = loadFixture("douyin_video_playwm.json")
 
         assertEquals(DouyinParser.DouyinContentType.VIDEO, parser.classifyContentTypeForTest(item))
 
         val mediaItems = parser.buildMediaItemsForTest(item)
-        assertEquals(1, mediaItems.size)
-        assertEquals(MediaType.VIDEO, mediaItems[0].type)
-        assertTrue(mediaItems[0].url.contains("/aweme/v1/play/"))
-        assertTrue(!mediaItems[0].url.contains("playwm", ignoreCase = true))
-        assertTrue(mediaItems[0].url.contains("v0300f9f0000bu3ctfaajd99kv7dbidg"))
+        assertEquals(2, mediaItems.size)
+        assertTrue(mediaItems.all { it.type == MediaType.VIDEO })
+        assertTrue(mediaItems.any { it.url.contains("/aweme/v1/play/") && !it.url.contains("playwm") })
+        assertTrue(mediaItems.any { it.url.contains("playwm") })
+        assertTrue(mediaItems.any { it.label == "API 无水印" })
+        assertTrue(mediaItems.any { it.label == "API 带水印" })
     }
 
     /**
-     * url_list 为空时应由 play_addr.uri 构造 play 播放链。
+     * url_list 为空时应由 play_addr.uri 构造 play 与 playwm 两条变体。
      */
     @Test
-    fun buildMediaItems_videoPost_uriOnly_buildsPlayUrl() {
+    fun buildMediaItems_videoPost_uriOnly_buildsPlayAndPlaywmVariants() {
         val item = loadFixture("douyin_video_uri_only.json")
 
         val mediaItems = parser.buildMediaItemsForTest(item)
-        assertEquals(1, mediaItems.size)
-        assertEquals(MediaType.VIDEO, mediaItems[0].type)
-        assertTrue(mediaItems[0].url.contains("/aweme/v1/play/"))
-        assertTrue(mediaItems[0].url.contains("v0400abc0000testvideouri01"))
+        assertEquals(2, mediaItems.size)
+        assertTrue(mediaItems.all { it.type == MediaType.VIDEO })
+        assertTrue(mediaItems.any { it.url.contains("/aweme/v1/play/") && !it.url.contains("playwm") })
+        assertTrue(mediaItems.any { it.url.contains("playwm") })
+        assertTrue(mediaItems.any { it.url.contains("v0400abc0000testvideouri01") })
+    }
+
+    /**
+     * embeddedHtml 样本应产出 API 变体，带水印链保留原 playwm 路径。
+     */
+    @Test
+    fun buildMediaItems_embeddedHtmlSample_returnsApiVariantsWithPlaywmFallback() {
+        val item = loadFixture("douyin_video_embedded_html.json")
+
+        assertEquals(DouyinParser.DouyinContentType.VIDEO, parser.classifyContentTypeForTest(item))
+
+        val mediaItems = parser.buildMediaItemsForTest(item)
+        assertTrue(mediaItems.size >= 2)
+        assertTrue(mediaItems.any { it.label == "API 无水印" && it.url.contains("/aweme/v1/play/") })
+        assertTrue(mediaItems.any { it.label == "API 带水印" && it.url.contains("playwm") })
+        assertTrue(mediaItems.any { it.fileName?.contains("api_wm") == true })
     }
 
     /**

@@ -19,6 +19,7 @@
     <string name="label_preview">媒体预览</string>
     <string name="label_media_image">图片</string>
     <string name="label_media_video">视频</string>
+    <string name="label_media_video_variant">视频 · %1$s</string>
     <string name="label_media_index">资源 %1$d</string>
     <string name="label_author">作者：%1$s</string>
     <string name="msg_clipboard_empty">剪贴板为空</string>
